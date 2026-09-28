@@ -1,0 +1,13 @@
+# Helm values for ledger-worker, production (ap-south-1).
+replicaCount: 6
+
+image:
+  repository: 483920117734.dkr.ecr.ap-south-1.amazonaws.com/nimbus/ledger-worker
+  tag: "2026.09.28-3"
+
+env:
+  KAFKA_BOOTSTRAP: "kafka-0.nimbus.internal:9092,kafka-1.nimbus.internal:9092,kafka-2.nimbus.internal:9092"
+  LEDGER_CONSUMER_GROUP: "ledger-cg"
+  LEDGER_TOPIC: "payments.settled"
+  LEDGER_BATCH_SIZE: "500"
+  MAX_POLL_INTERVAL_MS: "300000"

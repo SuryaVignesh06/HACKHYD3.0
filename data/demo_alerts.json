@@ -1,0 +1,109 @@
+[
+  {
+    "id": "DEMO-A",
+    "title": "payments-api p99 latency at 4.2 s with Redis connection errors",
+    "service": "payments-api",
+    "severity": "SEV1",
+    "alert_text": "[FIRING] PaymentsApiHighLatency SEV1 payments-api\np99 latency 4.2s (threshold 1.5s) for 5m on POST /v1/charges\nlog: redis.exceptions.ConnectionError: Too many connections\n  File \"/app/payments/idempotency.py\", line 88, in get_idempotency_key\nrecent deploy: payments-api 2026.09.28-1 at 02:05",
+    "expected": "Strong match to the Redis pool exhaustion family. Should cite INC-030 and INC-037, warn that restarting pods failed, point at a worker concurrency change in the 02:05 deploy, and recommend raising REDIS_MAX_POOL and rolling back worker concurrency. The alert itself does not say what the deploy changed; only memory knows that concurrency changes cause this.",
+    "signals": [
+      {
+        "at_ms": 0,
+        "level": "info",
+        "text": "02:05:12 deploy payments-api 2026.09.28-1"
+      },
+      {
+        "at_ms": 900,
+        "level": "warn",
+        "text": "02:38:40 payments-api p99 1.9s (threshold 1.5s)"
+      },
+      {
+        "at_ms": 1800,
+        "level": "warn",
+        "text": "02:39:30 payments-api redis client errors 6/s: ConnectionError: Too many connections"
+      },
+      {
+        "at_ms": 2700,
+        "level": "critical",
+        "text": "02:40:05 payments-api p99 4.2s, charge failures 3.4%"
+      },
+      {
+        "at_ms": 3600,
+        "level": "critical",
+        "text": "02:40:07 PaymentsApiHighLatency SEV1 firing, paging on-call"
+      }
+    ]
+  },
+  {
+    "id": "DEMO-B",
+    "title": "ledger-worker consumer lag on ledger-cg after deploy",
+    "service": "ledger-worker",
+    "severity": "SEV2",
+    "alert_text": "[FIRING] KafkaConsumerGroupLag SEV2 ledger-worker\nconsumer group ledger-cg lag=184322 (threshold 20000) on topic payments.settled\nlog: CommitFailedException: Commit cannot be completed since the group has already rebalanced\nrecent deploy: ledger-worker 2026.09.28-3 at 15:10",
+    "expected": "Matches the Kafka consumer lag family. Should warn that scaling consumers up failed in INC-007 and INC-018, and recommend rolling back the batch-size config.",
+    "signals": [
+      {
+        "at_ms": 0,
+        "level": "info",
+        "text": "15:10:02 deploy ledger-worker 2026.09.28-3"
+      },
+      {
+        "at_ms": 900,
+        "level": "warn",
+        "text": "15:14:40 ledger-cg rebalances 4 in 5m"
+      },
+      {
+        "at_ms": 1800,
+        "level": "warn",
+        "text": "15:18:10 ledger-cg lag=61,904 on payments.settled"
+      },
+      {
+        "at_ms": 2700,
+        "level": "critical",
+        "text": "15:24:55 ledger-cg lag=184,322, CommitFailedException rate 12/s"
+      },
+      {
+        "at_ms": 3600,
+        "level": "critical",
+        "text": "15:25:00 KafkaConsumerGroupLag SEV2 firing, paging on-call"
+      }
+    ]
+  },
+  {
+    "id": "DEMO-C",
+    "title": "search-api returning 502s after CDN config change",
+    "service": "search-api",
+    "severity": "SEV2",
+    "alert_text": "[FIRING] SearchApiEdge5xx SEV2 search-api\n502 Bad Gateway rate 38% at the edge for 5m on /v1/transactions/search\ncdn log: origin_response_status=502 upstream=search-origin.nimbuspay.io error=\"TLS handshake failed: SNI mismatch\"\nrecent change: CDN origin config updated at 11:40 (origin host header set to search-origin.nimbuspay.io)",
+    "expected": "No strong precedent in memory. The agent should say so plainly and give a low-confidence answer.",
+    "signals": [
+      {
+        "at_ms": 0,
+        "level": "info",
+        "text": "11:40:03 CDN origin config updated: search origin host header -> search-origin.nimbuspay.io"
+      },
+      {
+        "at_ms": 900,
+        "level": "warn",
+        "text": "11:41:20 edge 5xx on /v1/transactions/search 4%"
+      },
+      {
+        "at_ms": 1800,
+        "level": "warn",
+        "text": "11:42:45 cdn origin errors: TLS handshake failed: SNI mismatch"
+      },
+      {
+        "at_ms": 2700,
+        "level": "critical",
+        "text": "11:44:10 edge 502 rate 38% on search endpoints"
+      },
+      {
+        "at_ms": 3600,
+        "level": "critical",
+        "text": "11:44:12 SearchApiEdge5xx SEV2 firing, paging on-call"
+      }
+    ],
+    "follow_up_service": "checkout-web",
+    "follow_up_alert": "[FIRING] CheckoutEdgeErrors SEV2 checkout-web\nedge 502s on /checkout/* at 27% for 5m\ncdn log: upstream TLS negotiation error: server name does not match certificate for checkout-origin.nimbuspay.io\nrecent change: CDN origin rule for checkout edited 20 minutes ago"
+  }
+]

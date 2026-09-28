@@ -1,0 +1,27 @@
+# Helm values for payments-api, production (ap-south-1).
+# Rendered by the platform pipeline on every release; do not patch pods with kubectl set env.
+replicaCount: 6
+
+image:
+  repository: 483920117734.dkr.ecr.ap-south-1.amazonaws.com/nimbus/payments-api
+  tag: "2026.09.28-1"
+
+resources:
+  requests:
+    cpu: "1"
+    memory: 1Gi
+  limits:
+    memory: 2Gi
+
+env:
+  PAYMENTS_WORKER_CONCURRENCY: "24"
+  REDIS_URL: "redis://payments-redis.nimbus.internal:6379/0"
+  REDIS_MAX_POOL: "20"
+  REDIS_SOCKET_TIMEOUT_MS: "250"
+  IDEMPOTENCY_TTL_SECONDS: "86400"
+  RATE_LIMIT_WINDOW_SECONDS: "60"
+
+probes:
+  readiness:
+    path: /healthz
+    periodSeconds: 5

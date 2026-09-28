@@ -1,0 +1,1961 @@
+[
+  {
+    "incident_id": "INC-001",
+    "summary": "About 4% of outbound email and SMS sends failed for 51 minutes because DNS lookups from notifications-svc pods intermittently timed out.",
+    "root_cause": "CoreDNS was running only 2 replicas for a cluster that had grown to 38 nodes. Node.js does not cache DNS, and with the default ndots:5 every external lookup fanned out into 5 queries. CoreDNS hit its CPU limit and dropped UDP queries.",
+    "timeline": [
+      {
+        "time": "2026-03-02T14:12:00+05:30",
+        "event": "Alert fired for notifications-svc send error rate at 4.1%."
+      },
+      {
+        "time": "2026-03-02T14:18:00+05:30",
+        "event": "Daniel suspected a SendGrid outage; the SendGrid status page was green."
+      },
+      {
+        "time": "2026-03-02T14:26:00+05:30",
+        "event": "Found EAI_AGAIN errors spread across all notifications-svc pods, not one node."
+      },
+      {
+        "time": "2026-03-02T14:34:00+05:30",
+        "event": "CoreDNS pods at 100% of their 100m CPU limit, with throttling in the metrics."
+      },
+      {
+        "time": "2026-03-02T14:43:00+05:30",
+        "event": "Scaled CoreDNS from 2 to 6 replicas and raised its CPU limit to 500m."
+      },
+      {
+        "time": "2026-03-02T14:52:00+05:30",
+        "event": "Added dnsConfig ndots:2 to the notifications-svc deployment and rolled it out."
+      },
+      {
+        "time": "2026-03-02T15:03:00+05:30",
+        "event": "Error rate back under 0.1% for 10 minutes; resolved."
+      }
+    ],
+    "attempts": [
+      {
+        "action": "Checked the SendGrid status page and opened a support ticket",
+        "outcome": "failed",
+        "notes": "SendGrid was healthy; this cost 8 minutes."
+      },
+      {
+        "action": "Scaled CoreDNS to 6 replicas and raised its CPU limit to 500m",
+        "outcome": "worked",
+        "notes": "Dropped queries stopped within 2 minutes."
+      },
+      {
+        "action": "Set dnsConfig ndots:2 on notifications-svc",
+        "outcome": "worked",
+        "notes": "Cut DNS query volume from the service by about 70%."
+      }
+    ],
+    "fix": "Scaled CoreDNS to 6 replicas with a 500m CPU limit and set ndots:2 on notifications-svc.",
+    "follow_ups": [
+      "Install the cluster-proportional-autoscaler for CoreDNS.",
+      "Add a CoreDNS dropped-queries alert."
+    ],
+    "ttr_minutes": 51
+  },
+  {
+    "incident_id": "INC-002",
+    "summary": "Checkout completion dropped from 78% to 41% for 34 minutes after the checkout-v2 feature flag was set to 100% of traffic instead of the planned 10%.",
+    "root_cause": "The flag change in the flag dashboard was entered as 100 in the percentage field during a rushed release. checkout-v2 crashed for saved cards without a billing address, a case that only 10% of traffic would have exposed slowly.",
+    "timeline": [
+      {
+        "time": "2026-03-09T11:03:00+05:30",
+        "event": "Conversion-drop alert fired for checkout-web."
+      },
+      {
+        "time": "2026-03-09T11:08:00+05:30",
+        "event": "Sofia saw a spike of TypeError in Sentry, all from checkout-v2 components."
+      },
+      {
+        "time": "2026-03-09T11:12:00+05:30",
+        "event": "Tried rolling back the 10:40 checkout-web deploy; errors continued because the flag was still on."
+      },
+      {
+        "time": "2026-03-09T11:22:00+05:30",
+        "event": "Rahul pointed out the checkout-v2 flag audit log showed 100% at 10:52."
+      },
+      {
+        "time": "2026-03-09T11:24:00+05:30",
+        "event": "Flag set back to 0%."
+      },
+      {
+        "time": "2026-03-09T11:37:00+05:30",
+        "event": "Conversion rate back at baseline; resolved."
+      }
+    ],
+    "attempts": [
+      {
+        "action": "Rolled back the checkout-web deploy from 10:40",
+        "outcome": "failed",
+        "notes": "The code path was controlled by the flag, not the deploy."
+      },
+      {
+        "action": "Set the checkout-v2 flag to 0%",
+        "outcome": "worked",
+        "notes": "Errors stopped within a minute."
+      }
+    ],
+    "fix": "Turned off the checkout-v2 flag, then shipped a null check for billingAddress before re-enabling at 10%.",
+    "follow_ups": [
+      "Require a second approver for flag changes above 25%.",
+      "Add a staged rollout preset to the flag dashboard."
+    ],
+    "ttr_minutes": 34
+  },
+  {
+    "incident_id": "INC-003",
+    "summary": "payments-api p99 latency rose to 3.6 s and 2.3% of charge requests failed for 58 minutes. The Redis client connection pool was exhausted after a deploy doubled worker concurrency.",
+    "root_cause": "The 21:20 release raised PAYMENTS_WORKER_CONCURRENCY from 8 to 16 gunicorn threads per pod, but REDIS_MAX_POOL stayed at 20. Each request holds a Redis connection for the idempotency check and the rate-limit check, so under evening peak the pool ran out and redis-py raised ConnectionError: Too many connections.",
+    "timeline": [
+      {
+        "time": "2026-03-19T21:47:00+05:30",
+        "event": "Latency alert fired for payments-api, p99 at 3.6 s."
+      },
+      {
+        "time": "2026-03-19T21:51:00+05:30",
+        "event": "Marcus saw redis.exceptions.ConnectionError: Too many connections in the logs."
+      },
+      {
+        "time": "2026-03-19T21:56:00+05:30",
+        "event": "Checked the Redis server: 31% CPU, 900 of 10000 maxclients in use. Redis itself was healthy."
+      },
+      {
+        "time": "2026-03-19T22:02:00+05:30",
+        "event": "Restarted all payments-api pods with a rolling restart."
+      },
+      {
+        "time": "2026-03-19T22:14:00+05:30",
+        "event": "Latency dropped briefly, then climbed back to 3.4 s within 8 minutes of the restart."
+      },
+      {
+        "time": "2026-03-19T22:23:00+05:30",
+        "event": "Noticed the 21:20 deploy changed PAYMENTS_WORKER_CONCURRENCY from 8 to 16."
+      },
+      {
+        "time": "2026-03-19T22:28:00+05:30",
+        "event": "Rolled back the worker concurrency change to 8."
+      },
+      {
+        "time": "2026-03-19T22:45:00+05:30",
+        "event": "p99 back at 380 ms for 15 minutes; resolved."
+      }
+    ],
+    "attempts": [
+      {
+        "action": "Rolling restart of payments-api pods",
+        "outcome": "failed",
+        "notes": "Fresh pools filled up again within 8 minutes because the concurrency was still 16."
+      },
+      {
+        "action": "Rolled back PAYMENTS_WORKER_CONCURRENCY from 16 to 8",
+        "outcome": "worked",
+        "notes": "Pool usage fell to about 60% and latency recovered."
+      }
+    ],
+    "fix": "Rolled back PAYMENTS_WORKER_CONCURRENCY to 8 so the 20-connection Redis pool was enough again.",
+    "follow_ups": [
+      "Size REDIS_MAX_POOL from worker concurrency (at least 3 connections per thread) instead of a fixed 20.",
+      "Add a Redis client pool utilisation metric and alert at 80%."
+    ],
+    "ttr_minutes": 58
+  },
+  {
+    "incident_id": "INC-004",
+    "summary": "18% of payments-api requests returned 500 for 44 minutes because a schema migration held an ACCESS EXCLUSIVE lock on the charges table during business hours.",
+    "root_cause": "Migration 0142 added a column with a volatile default to the 41M-row charges table, which rewrites the table under an ACCESS EXCLUSIVE lock. The migration ran as part of the 15:25 deploy, in peak hours, with no lock_timeout, so every query on charges queued behind it and hit the application's 3 s lock timeout.",
+    "timeline": [
+      {
+        "time": "2026-03-25T15:30:00+05:30",
+        "event": "5xx alert fired for payments-api at 18%."
+      },
+      {
+        "time": "2026-03-25T15:35:00+05:30",
+        "event": "Aiko found LockNotAvailable errors on the charges table."
+      },
+      {
+        "time": "2026-03-25T15:39:00+05:30",
+        "event": "pg_stat_activity showed migration 0142 running ALTER TABLE charges for 6 minutes."
+      },
+      {
+        "time": "2026-03-25T15:42:00+05:30",
+        "event": "Ran pg_terminate_backend on the migration session."
+      },
+      {
+        "time": "2026-03-25T15:45:00+05:30",
+        "event": "Errors kept going: the table rewrite had to roll back, and the migration Job restarted automatically (backoffLimit 3) and took the lock again."
+      },
+      {
+        "time": "2026-03-25T15:54:00+05:30",
+        "event": "Deleted the migration Job and terminated the session again; the rollback finished at minute 29."
+      },
+      {
+        "time": "2026-03-25T16:01:00+05:30",
+        "event": "5xx rate dropped to 0.4%."
+      },
+      {
+        "time": "2026-03-25T16:14:00+05:30",
+        "event": "Error rate at baseline; resolved. Migration rescheduled."
+      }
+    ],
+    "attempts": [
+      {
+        "action": "Killed the blocking migration query with pg_terminate_backend",
+        "outcome": "failed",
+        "notes": "The rollback kept the lock, and the Kubernetes Job retried the migration, so the outage got longer."
+      },
+      {
+        "action": "Deleted the migration Job, then terminated the session",
+        "outcome": "worked",
+        "notes": "The lock was released once the rollback completed."
+      }
+    ],
+    "fix": "Removed the migration Job, let the rollback finish, and re-ran 0142 at 02:00 as an add-column-without-default plus a batched backfill.",
+    "follow_ups": [
+      "Run migrations with SET lock_timeout = '2s' and retries.",
+      "Move schema migrations out of the deploy pipeline into an off-peak window.",
+      "Set backoffLimit 0 on migration Jobs."
+    ],
+    "ttr_minutes": 44
+  },
+  {
+    "incident_id": "INC-005",
+    "summary": "The nightly reconciliation job ran twice for 28 March, creating duplicate settlement batches that were caught before the payout file was sent.",
+    "root_cause": "The reconciliation CronJob was scheduled at 01:30 Europe/Berlin through a TZ setting in the container. The European DST change on 29 March shifted the clock, and the scheduler's catch-up logic fired the job twice. The job ran with force=true from an old manual rerun script, so the duplicate-batch guard was skipped.",
+    "timeline": [
+      {
+        "time": "2026-03-29T03:10:00+05:30",
+        "event": "Duplicate batch alert fired."
+      },
+      {
+        "time": "2026-03-29T03:22:00+05:30",
+        "event": "Grace confirmed two batches for 2026-03-28 with identical totals."
+      },
+      {
+        "time": "2026-03-29T03:30:00+05:30",
+        "event": "Paused the payout export CronJob so the duplicates would not reach the bank."
+      },
+      {
+        "time": "2026-03-29T03:48:00+05:30",
+        "event": "Deleted the second batch after finance confirmed the first one matched the bank statement."
+      },
+      {
+        "time": "2026-03-29T04:05:00+05:30",
+        "event": "Re-ran the payout export; resolved."
+      }
+    ],
+    "attempts": [
+      {
+        "action": "Paused the payout export CronJob",
+        "outcome": "worked",
+        "notes": "Stopped duplicate payouts from going out."
+      },
+      {
+        "action": "Deleted the duplicate batch after finance sign-off",
+        "outcome": "worked",
+        "notes": "Ledger matched the bank statement again."
+      }
+    ],
+    "fix": "Removed the duplicate batch, moved the CronJob schedule to UTC and removed force=true from the job args.",
+    "follow_ups": [
+      "Make the reconciliation job idempotent per settlement_date.",
+      "Ban TZ-based CronJob schedules in the Helm chart linter."
+    ],
+    "ttr_minutes": 55
+  },
+  {
+    "incident_id": "INC-006",
+    "summary": "Three ledger-worker pods were evicted and ledger exports stalled for 37 minutes because one node's disk filled up.",
+    "root_cause": "A ledger-worker pod had been left at LOG_LEVEL=DEBUG after an investigation two days earlier. It wrote about 60 GB of container logs to the node's 80 GB root volume, and the kubelet evicted every pod on the node when it hit DiskPressure.",
+    "timeline": [
+      {
+        "time": "2026-04-03T09:42:00+05:30",
+        "event": "DiskPressure alert fired and 3 ledger-worker pods were evicted."
+      },
+      {
+        "time": "2026-04-03T09:50:00+05:30",
+        "event": "Tomás found a single pod with 58 GB of container logs."
+      },
+      {
+        "time": "2026-04-03T09:56:00+05:30",
+        "event": "Cordoned and drained the node; pods rescheduled onto healthy nodes."
+      },
+      {
+        "time": "2026-04-03T10:04:00+05:30",
+        "event": "Reset LOG_LEVEL to INFO on the ledger-worker deployment."
+      },
+      {
+        "time": "2026-04-03T10:19:00+05:30",
+        "event": "Exports caught up; resolved."
+      }
+    ],
+    "attempts": [
+      {
+        "action": "Deleted old files in /tmp inside the pod",
+        "outcome": "failed",
+        "notes": "The space was used by container logs on the node, not /tmp."
+      },
+      {
+        "action": "Drained the node and reset LOG_LEVEL to INFO",
+        "outcome": "worked",
+        "notes": "Pods rescheduled and exports resumed."
+      }
+    ],
+    "fix": "Drained the node and set LOG_LEVEL back to INFO.",
+    "follow_ups": [
+      "Set containerLogMaxSize to 100Mi on all node groups.",
+      "Alert when any deployment runs at DEBUG for more than 6 hours."
+    ],
+    "ttr_minutes": 37
+  },
+  {
+    "incident_id": "INC-007",
+    "summary": "ledger-worker fell 97,410 messages behind on payments.settled for 71 minutes after a deploy raised the consumer batch size. Ledger balances in the dashboard were stale for merchants.",
+    "root_cause": "The 15:40 deploy raised max.poll.records from 500 to 5000 to speed up processing. Processing 5000 records took longer than max.poll.interval.ms (300 s) under peak load, so consumers were kicked out of the group, their commits failed, and the group rebalanced over and over, reprocessing the same batches.",
+    "timeline": [
+      {
+        "time": "2026-04-08T16:05:00+05:30",
+        "event": "Consumer lag alert fired at 97,410 on ledger-cg."
+      },
+      {
+        "time": "2026-04-08T16:12:00+05:30",
+        "event": "Rahul assumed not enough consumers and scaled ledger-worker from 6 to 12 replicas."
+      },
+      {
+        "time": "2026-04-08T16:24:00+05:30",
+        "event": "Lag kept rising. Logs full of CommitFailedException and constant rebalances."
+      },
+      {
+        "time": "2026-04-08T16:31:00+05:30",
+        "event": "Scaled to 18 replicas; the topic only has 12 partitions, so 6 consumers sat idle and rebalances got worse."
+      },
+      {
+        "time": "2026-04-08T16:46:00+05:30",
+        "event": "Aiko spotted max.poll.records=5000 in the 15:40 deploy diff."
+      },
+      {
+        "time": "2026-04-08T16:49:00+05:30",
+        "event": "Rolled back the batch-size config to 500 and scaled back to 6 replicas."
+      },
+      {
+        "time": "2026-04-08T17:16:00+05:30",
+        "event": "Lag back under 1,000; resolved."
+      }
+    ],
+    "attempts": [
+      {
+        "action": "Scaled ledger-worker consumers from 6 to 12, then 18 replicas",
+        "outcome": "failed",
+        "notes": "More consumers caused more rebalances, and the 12-partition topic cannot use more than 12 consumers."
+      },
+      {
+        "action": "Rolled back max.poll.records from 5000 to 500",
+        "outcome": "worked",
+        "notes": "Rebalances stopped and lag drained in about 25 minutes."
+      }
+    ],
+    "fix": "Rolled back max.poll.records to 500 and scaled ledger-worker back to 6 replicas.",
+    "follow_ups": [
+      "Add a rebalance-rate alert on ledger-cg.",
+      "Load-test consumer config changes against max.poll.interval.ms before release."
+    ],
+    "ttr_minutes": 71
+  },
+  {
+    "incident_id": "INC-008",
+    "summary": "Logins and token refreshes failed for all customers for 47 minutes because the TLS certificate on auth.nimbuspay.io expired.",
+    "root_cause": "The auth-service certificate was a 90-day Let's Encrypt certificate renewed by hand with certbot on a bastion host. The engineer who used to renew it had moved teams, and the calendar reminder went to their old team alias.",
+    "timeline": [
+      {
+        "time": "2026-04-15T05:32:00+05:30",
+        "event": "Blackbox probe alert fired from all regions."
+      },
+      {
+        "time": "2026-04-15T05:38:00+05:30",
+        "event": "Priya reproduced x509: certificate has expired with curl."
+      },
+      {
+        "time": "2026-04-15T05:47:00+05:30",
+        "event": "Found the renewal runbook; the certbot bastion's AWS credentials had been rotated."
+      },
+      {
+        "time": "2026-04-15T06:01:00+05:30",
+        "event": "Issued a new certificate with certbot using DNS validation from a laptop."
+      },
+      {
+        "time": "2026-04-15T06:10:00+05:30",
+        "event": "Updated the Kubernetes TLS secret and restarted the ingress controller."
+      },
+      {
+        "time": "2026-04-15T06:19:00+05:30",
+        "event": "Logins recovered; resolved."
+      }
+    ],
+    "attempts": [
+      {
+        "action": "Manually renewed the certificate with certbot and updated the TLS secret",
+        "outcome": "worked",
+        "notes": "Fixed the outage for now, but the next expiry is again 90 days away with no automation."
+      }
+    ],
+    "fix": "Manually renewed the Let's Encrypt certificate and replaced the auth-service TLS secret.",
+    "follow_ups": [
+      "Move auth-service certificates to cert-manager with automatic renewal.",
+      "Alert 14 days before any certificate expires."
+    ],
+    "ttr_minutes": 47
+  },
+  {
+    "incident_id": "INC-009",
+    "summary": "notifications-svc pods were OOMKilled every 20 to 30 minutes, delaying emails and SMS by up to 12 minutes, for 64 minutes before memory limits were raised.",
+    "root_cause": "Memory grew steadily from start-up until the 512Mi limit. The team believed the cause was the new marketing template set being larger than before, and raised the limit. The leak itself was not identified during this incident.",
+    "timeline": [
+      {
+        "time": "2026-04-22T13:18:00+05:30",
+        "event": "CrashLoop alert fired with OOMKilled, exit code 137."
+      },
+      {
+        "time": "2026-04-22T13:28:00+05:30",
+        "event": "Daniel saw memory climbing linearly to 512Mi in Grafana."
+      },
+      {
+        "time": "2026-04-22T13:40:00+05:30",
+        "event": "Linked the timing to the new marketing template set launched that morning."
+      },
+      {
+        "time": "2026-04-22T13:53:00+05:30",
+        "event": "Raised the memory limit from 512Mi to 1Gi."
+      },
+      {
+        "time": "2026-04-22T14:22:00+05:30",
+        "event": "No restarts for 25 minutes; resolved."
+      }
+    ],
+    "attempts": [
+      {
+        "action": "Raised the notifications-svc memory limit from 512Mi to 1Gi",
+        "outcome": "partial",
+        "notes": "Restarts stopped for now, but memory was still growing slowly."
+      }
+    ],
+    "fix": "Raised the memory limit to 1Gi.",
+    "follow_ups": [
+      "Take a heap snapshot from a long-running pod to confirm the template theory."
+    ],
+    "ttr_minutes": 64
+  },
+  {
+    "incident_id": "INC-010",
+    "summary": "22% of API calls across services returned 401 for 29 minutes after auth-service began signing tokens with a new key that downstream services had not fetched yet.",
+    "root_cause": "The key rotation published the new key to the JWKS endpoint and started signing with it at the same moment. Downstream services cache the JWKS for 1 hour, so they rejected tokens signed with the new kid.",
+    "timeline": [
+      {
+        "time": "2026-04-28T10:25:00+05:30",
+        "event": "401 spike alert fired."
+      },
+      {
+        "time": "2026-04-28T10:32:00+05:30",
+        "event": "Sofia saw InvalidSignatureError with kid=2026-04 on payments-api and checkout-web."
+      },
+      {
+        "time": "2026-04-28T10:38:00+05:30",
+        "event": "Switched auth-service back to signing with kid=2026-03, which was still in every cache."
+      },
+      {
+        "time": "2026-04-28T10:54:00+05:30",
+        "event": "401 rate at baseline; resolved."
+      }
+    ],
+    "attempts": [
+      {
+        "action": "Reverted auth-service to sign with the previous key kid=2026-03",
+        "outcome": "worked",
+        "notes": "New tokens were accepted everywhere."
+      }
+    ],
+    "fix": "Reverted signing to the old key, then published the new key 24 hours before switching.",
+    "follow_ups": [
+      "Document a two-step key rotation: publish, wait longer than the JWKS cache TTL, then sign."
+    ],
+    "ttr_minutes": 29
+  },
+  {
+    "incident_id": "INC-011",
+    "summary": "31% of emails failed for 49 minutes when the monthly payout notification burst hit SendGrid's rate limit.",
+    "root_cause": "The payout run enqueued 180,000 merchant emails at once. notifications-svc sends immediately with a fixed retry of 3 attempts, 1 s apart, so each 429 produced 3 more requests and kept the account over its limit.",
+    "timeline": [
+      {
+        "time": "2026-05-06T18:02:00+05:30",
+        "event": "Send failure alert fired at 31%."
+      },
+      {
+        "time": "2026-05-06T18:08:00+05:30",
+        "event": "Tomás found 429 Too Many Requests from api.sendgrid.com."
+      },
+      {
+        "time": "2026-05-06T18:14:00+05:30",
+        "event": "Raised retries from 3 to 10 to push the emails through."
+      },
+      {
+        "time": "2026-05-06T18:22:00+05:30",
+        "event": "Failures went up to 44%; retries were multiplying traffic."
+      },
+      {
+        "time": "2026-05-06T18:29:00+05:30",
+        "event": "Set retries back to 3 and paused the payout email queue consumer."
+      },
+      {
+        "time": "2026-05-06T18:37:00+05:30",
+        "event": "Resumed the queue at 50 messages per second."
+      },
+      {
+        "time": "2026-05-06T18:51:00+05:30",
+        "event": "Backlog drained; resolved."
+      }
+    ],
+    "attempts": [
+      {
+        "action": "Increased send retries from 3 to 10",
+        "outcome": "failed",
+        "notes": "Retrying harder multiplied the traffic and made the rate limiting worse."
+      },
+      {
+        "action": "Paused the queue, then resumed at 50 messages per second",
+        "outcome": "worked",
+        "notes": "Stayed under the SendGrid limit and drained the backlog."
+      }
+    ],
+    "fix": "Throttled the payout email queue to 50 messages per second.",
+    "follow_ups": [
+      "Add exponential backoff with jitter that honours Retry-After.",
+      "Queue bulk sends instead of sending inline."
+    ],
+    "ttr_minutes": 49
+  },
+  {
+    "incident_id": "INC-012",
+    "summary": "9% of payments-api requests failed for 33 minutes because PgBouncer reached max_client_conn after the new analytics exporter was deployed.",
+    "root_cause": "The new analytics-exporter service connected through the same PgBouncer with a pool of 200 connections, pushing total client connections past max_client_conn=500.",
+    "timeline": [
+      {
+        "time": "2026-05-12T12:40:00+05:30",
+        "event": "5xx alert fired on payments-api."
+      },
+      {
+        "time": "2026-05-12T12:48:00+05:30",
+        "event": "Aiko found FATAL: no more connections allowed (max_client_conn) from PgBouncer."
+      },
+      {
+        "time": "2026-05-12T12:55:00+05:30",
+        "event": "SHOW CLIENTS showed 200 connections from analytics-exporter."
+      },
+      {
+        "time": "2026-05-12T12:59:00+05:30",
+        "event": "Scaled analytics-exporter to 0."
+      },
+      {
+        "time": "2026-05-12T13:13:00+05:30",
+        "event": "Errors gone; resolved."
+      }
+    ],
+    "attempts": [
+      {
+        "action": "Scaled analytics-exporter to 0",
+        "outcome": "worked",
+        "notes": "Freed 200 client connections immediately."
+      }
+    ],
+    "fix": "Stopped analytics-exporter and moved it to the read replica with its own PgBouncer.",
+    "follow_ups": [
+      "Give each service its own PgBouncer user with a connection cap."
+    ],
+    "ttr_minutes": 33
+  },
+  {
+    "incident_id": "INC-013",
+    "summary": "Transaction search failed for 12% of requests for 42 minutes because a new merchant analytics query used a huge terms aggregation.",
+    "root_cause": "A dashboard feature shipped a terms aggregation on customer_email with size 100000 across 18 months of data, which tripped the OpenSearch parent circuit breaker.",
+    "timeline": [
+      {
+        "time": "2026-05-19T17:15:00+05:30",
+        "event": "Error rate alert fired."
+      },
+      {
+        "time": "2026-05-19T17:24:00+05:30",
+        "event": "Grace found circuit_breaking_exception in the OpenSearch logs."
+      },
+      {
+        "time": "2026-05-19T17:33:00+05:30",
+        "event": "Traced the heavy query to the analytics dashboard endpoint."
+      },
+      {
+        "time": "2026-05-19T17:39:00+05:30",
+        "event": "Disabled the dashboard widget with its feature flag."
+      },
+      {
+        "time": "2026-05-19T17:57:00+05:30",
+        "event": "Heap usage normal; resolved."
+      }
+    ],
+    "attempts": [
+      {
+        "action": "Restarted the OpenSearch data nodes one at a time",
+        "outcome": "failed",
+        "notes": "The query came back as soon as dashboards reloaded."
+      },
+      {
+        "action": "Disabled the analytics widget flag",
+        "outcome": "worked",
+        "notes": "Heap pressure dropped right away."
+      }
+    ],
+    "fix": "Disabled the widget, then rewrote the query as a composite aggregation with paging.",
+    "follow_ups": [
+      "Cap aggregation size at the search-api layer."
+    ],
+    "ttr_minutes": 42
+  },
+  {
+    "incident_id": "INC-014",
+    "summary": "payments-api p99 latency hit 4.0 s with 3.1% of charges failing for 67 minutes. Same failure as INC-003: Redis client pool exhaustion after worker concurrency was raised.",
+    "root_cause": "A performance tuning PR raised PAYMENTS_WORKER_CONCURRENCY from 8 to 12. The INC-003 follow-up to size REDIS_MAX_POOL from concurrency was never done, so the pool was still a fixed 20 connections and ran out at evening peak.",
+    "timeline": [
+      {
+        "time": "2026-05-27T20:11:00+05:30",
+        "event": "Latency alert fired, p99 at 4.0 s."
+      },
+      {
+        "time": "2026-05-27T20:16:00+05:30",
+        "event": "Tomás saw redis.exceptions.ConnectionError: Too many connections."
+      },
+      {
+        "time": "2026-05-27T20:22:00+05:30",
+        "event": "Suspected the Redis server and failed over to the replica."
+      },
+      {
+        "time": "2026-05-27T20:31:00+05:30",
+        "event": "No change; the replica was healthy and so was the primary."
+      },
+      {
+        "time": "2026-05-27T20:35:00+05:30",
+        "event": "Restarted payments-api pods."
+      },
+      {
+        "time": "2026-05-27T20:46:00+05:30",
+        "event": "Latency came back within 10 minutes of the restart."
+      },
+      {
+        "time": "2026-05-27T20:57:00+05:30",
+        "event": "Found INC-003 in the postmortem archive. Same error, same cause."
+      },
+      {
+        "time": "2026-05-27T21:00:00+05:30",
+        "event": "Rolled back PAYMENTS_WORKER_CONCURRENCY from 12 to 8."
+      },
+      {
+        "time": "2026-05-27T21:18:00+05:30",
+        "event": "p99 back at 400 ms; resolved."
+      }
+    ],
+    "attempts": [
+      {
+        "action": "Failed Redis over to the replica",
+        "outcome": "failed",
+        "notes": "Redis was never the bottleneck; the client-side pool was."
+      },
+      {
+        "action": "Rolling restart of payments-api pods",
+        "outcome": "failed",
+        "notes": "Same as INC-003: pools filled up again within 10 minutes."
+      },
+      {
+        "action": "Rolled back PAYMENTS_WORKER_CONCURRENCY from 12 to 8",
+        "outcome": "worked",
+        "notes": "Latency recovered in about 15 minutes."
+      }
+    ],
+    "fix": "Rolled back worker concurrency to 8.",
+    "follow_ups": [
+      "Actually do the INC-003 follow-up: derive REDIS_MAX_POOL from worker concurrency.",
+      "Link the Redis section of the payments runbook to INC-003 and this incident."
+    ],
+    "ttr_minutes": 67
+  },
+  {
+    "incident_id": "INC-015",
+    "summary": "27% of logins failed for 52 minutes because an index migration on the auth-service sessions table held a lock at midday.",
+    "root_cause": "Migration 0077 used CREATE INDEX without CONCURRENTLY on the 23M-row sessions table, which blocks writes. It ran in the deploy pipeline at 11:45. The INC-004 follow-ups (lock_timeout on migrations, off-peak window) had only been applied to payments-api.",
+    "timeline": [
+      {
+        "time": "2026-06-03T11:50:00+05:30",
+        "event": "Login error alert fired."
+      },
+      {
+        "time": "2026-06-03T11:56:00+05:30",
+        "event": "Rahul saw LockNotAvailable on sessions."
+      },
+      {
+        "time": "2026-06-03T12:01:00+05:30",
+        "event": "Killed the migration session with pg_terminate_backend."
+      },
+      {
+        "time": "2026-06-03T12:04:00+05:30",
+        "event": "The migration Job restarted and blocked again, exactly as in INC-004."
+      },
+      {
+        "time": "2026-06-03T12:12:00+05:30",
+        "event": "Deleted the Job, then terminated the session."
+      },
+      {
+        "time": "2026-06-03T12:20:00+05:30",
+        "event": "Errors dropping."
+      },
+      {
+        "time": "2026-06-03T12:42:00+05:30",
+        "event": "Login error rate normal; resolved."
+      }
+    ],
+    "attempts": [
+      {
+        "action": "Killed the blocking query with pg_terminate_backend",
+        "outcome": "failed",
+        "notes": "The Job retried the migration and took the lock again, as in INC-004."
+      },
+      {
+        "action": "Deleted the migration Job, then terminated the session",
+        "outcome": "worked",
+        "notes": "Lock released."
+      }
+    ],
+    "fix": "Removed the Job and re-ran the index as CREATE INDEX CONCURRENTLY at 02:00 with lock_timeout 2s.",
+    "follow_ups": [
+      "Apply the migration runner with lock_timeout and backoffLimit 0 to every service, not only payments-api."
+    ],
+    "ttr_minutes": 52
+  },
+  {
+    "incident_id": "INC-016",
+    "summary": "Card payments on checkout-web failed for everyone for 26 minutes after a security header change blocked Stripe.js.",
+    "root_cause": "A hardening PR tightened the Content-Security-Policy script-src to 'self' and missed the js.stripe.com allowance.",
+    "timeline": [
+      {
+        "time": "2026-06-09T14:36:00+05:30",
+        "event": "Payment step failure alert fired."
+      },
+      {
+        "time": "2026-06-09T14:41:00+05:30",
+        "event": "Priya reproduced the CSP violation in the browser console."
+      },
+      {
+        "time": "2026-06-09T14:45:00+05:30",
+        "event": "Rolled back the checkout-web deploy that changed the headers."
+      },
+      {
+        "time": "2026-06-09T15:02:00+05:30",
+        "event": "Card payments back to normal; resolved."
+      }
+    ],
+    "attempts": [
+      {
+        "action": "Rolled back the checkout-web header change",
+        "outcome": "worked",
+        "notes": "Stripe.js loaded again."
+      }
+    ],
+    "fix": "Rolled back, then re-shipped the CSP with js.stripe.com and hooks.stripe.com allowed.",
+    "follow_ups": [
+      "Ship CSP changes in Report-Only mode for a day first."
+    ],
+    "ttr_minutes": 26
+  },
+  {
+    "incident_id": "INC-017",
+    "summary": "The nightly ledger export to S3 failed for 81 minutes because the job used a static access key tied to an expired assumed-role session.",
+    "root_cause": "The export job still used credentials copied from a temporary assumed-role session into a Kubernetes secret during a migration months ago, instead of IRSA.",
+    "timeline": [
+      {
+        "time": "2026-06-13T02:15:00+05:30",
+        "event": "Export failure alert fired."
+      },
+      {
+        "time": "2026-06-13T02:29:00+05:30",
+        "event": "Daniel found ExpiredToken on PutObject."
+      },
+      {
+        "time": "2026-06-13T02:55:00+05:30",
+        "event": "Annotated the ledger-worker service account with the IRSA role and removed the static secret."
+      },
+      {
+        "time": "2026-06-13T03:17:00+05:30",
+        "event": "Re-ran the export job."
+      },
+      {
+        "time": "2026-06-13T03:36:00+05:30",
+        "event": "Export complete; resolved."
+      }
+    ],
+    "attempts": [
+      {
+        "action": "Switched the job to IRSA and removed the static credentials",
+        "outcome": "worked",
+        "notes": "Export succeeded on rerun."
+      }
+    ],
+    "fix": "Moved the export job to IRSA credentials.",
+    "follow_ups": [
+      "Scan all Kubernetes secrets for AWS access keys."
+    ],
+    "ttr_minutes": 81
+  },
+  {
+    "incident_id": "INC-018",
+    "summary": "ledger-cg lag reached 142,885 for 78 minutes after a ledger-worker deploy. Merchant balances were up to 40 minutes stale.",
+    "root_cause": "The 15:05 deploy bundled a config refactor that set LEDGER_BATCH_SIZE (max.poll.records) to 4000. Like INC-007, batches took longer than max.poll.interval.ms and the group kept rebalancing. The refactor had silently replaced the value that was restored after INC-007.",
+    "timeline": [
+      {
+        "time": "2026-06-17T15:22:00+05:30",
+        "event": "Consumer lag alert fired at 142,885."
+      },
+      {
+        "time": "2026-06-17T15:30:00+05:30",
+        "event": "Grace scaled ledger-worker from 6 to 12 replicas."
+      },
+      {
+        "time": "2026-06-17T15:43:00+05:30",
+        "event": "Lag still climbing; rebalances every 2 to 3 minutes."
+      },
+      {
+        "time": "2026-06-17T15:55:00+05:30",
+        "event": "Searched Slack and found INC-007; batch size had been changed in the refactor."
+      },
+      {
+        "time": "2026-06-17T16:00:00+05:30",
+        "event": "Rolled back LEDGER_BATCH_SIZE to 500 and scaled back to 6."
+      },
+      {
+        "time": "2026-06-17T16:40:00+05:30",
+        "event": "Lag cleared; resolved."
+      }
+    ],
+    "attempts": [
+      {
+        "action": "Scaled ledger-worker consumers from 6 to 12",
+        "outcome": "failed",
+        "notes": "Same as INC-007: more consumers only caused more rebalances."
+      },
+      {
+        "action": "Rolled back LEDGER_BATCH_SIZE to 500",
+        "outcome": "worked",
+        "notes": "Rebalances stopped and lag drained."
+      }
+    ],
+    "fix": "Rolled back the batch-size config to 500.",
+    "follow_ups": [
+      "Add a config test that fails the build if LEDGER_BATCH_SIZE is above 1000.",
+      "Add a rebalance-rate alert (still open from INC-007)."
+    ],
+    "ttr_minutes": 78
+  },
+  {
+    "incident_id": "INC-019",
+    "summary": "notifications-svc pods were OOMKilled at the 1Gi limit for 86 minutes, delaying notifications by up to 15 minutes. The INC-009 limit increase had only delayed the crash.",
+    "root_cause": "template-cache 2.4.0, pulled in by a caret range, kept every compiled template variant (per locale and merchant) in an unbounded Map. Memory grew with the number of merchants, not with traffic.",
+    "timeline": [
+      {
+        "time": "2026-06-24T10:08:00+05:30",
+        "event": "CrashLoop alert fired, OOMKilled exit code 137."
+      },
+      {
+        "time": "2026-06-24T10:15:00+05:30",
+        "event": "Sofia found INC-009, where the limit was raised to 1Gi."
+      },
+      {
+        "time": "2026-06-24T10:20:00+05:30",
+        "event": "Raised the limit again to 2Gi as a stopgap."
+      },
+      {
+        "time": "2026-06-24T10:38:00+05:30",
+        "event": "Heap snapshot from a 40-minute-old pod: 610 MB of compiled templates in template-cache."
+      },
+      {
+        "time": "2026-06-24T10:56:00+05:30",
+        "event": "template-cache changelog: 2.4.0 replaced the LRU with a Map for speed."
+      },
+      {
+        "time": "2026-06-24T11:08:00+05:30",
+        "event": "Pinned template-cache to ^2.3.4 in package.json and deployed."
+      },
+      {
+        "time": "2026-06-24T11:34:00+05:30",
+        "event": "Memory flat at 180 MB; resolved."
+      }
+    ],
+    "attempts": [
+      {
+        "action": "Raised the memory limit from 1Gi to 2Gi",
+        "outcome": "failed",
+        "notes": "Memory kept climbing; it would only delay the next crash."
+      },
+      {
+        "action": "Pinned template-cache to ^2.3.4",
+        "outcome": "worked",
+        "notes": "Memory stayed flat after the deploy."
+      }
+    ],
+    "fix": "Pinned template-cache to ^2.3.4 and set the memory limit back to 512Mi.",
+    "follow_ups": [
+      "Alert on memory growth slope, not only on OOMKilled."
+    ],
+    "ttr_minutes": 86
+  },
+  {
+    "incident_id": "INC-020",
+    "summary": "Many customers were logged out and some logins failed for 38 minutes because the auth-service Redis session store hit maxmemory.",
+    "root_cause": "The session TTL had been raised from 1 day to 30 days in a product change without resizing the 2 GB Redis node. With maxmemory-policy allkeys-lru, Redis evicted live sessions, then refused writes during peak.",
+    "timeline": [
+      {
+        "time": "2026-06-30T19:44:00+05:30",
+        "event": "Session loss alert fired."
+      },
+      {
+        "time": "2026-06-30T19:50:00+05:30",
+        "event": "Tomás saw OOM command not allowed on the session Redis."
+      },
+      {
+        "time": "2026-06-30T19:58:00+05:30",
+        "event": "Scaled the ElastiCache node from 2 GB to 8 GB."
+      },
+      {
+        "time": "2026-06-30T20:22:00+05:30",
+        "event": "Memory at 31%, logins normal; resolved."
+      }
+    ],
+    "attempts": [
+      {
+        "action": "Resized the session Redis node from 2 GB to 8 GB",
+        "outcome": "worked",
+        "notes": "Writes succeeded again."
+      }
+    ],
+    "fix": "Resized the session Redis and reduced the session TTL to 14 days.",
+    "follow_ups": [
+      "Alert on Redis used_memory above 80% of maxmemory."
+    ],
+    "ttr_minutes": 38
+  },
+  {
+    "incident_id": "INC-021",
+    "summary": "SMS delivery statuses stopped updating for 58 minutes because Twilio was still calling the old webhook domain.",
+    "root_cause": "The webhook domain moved from nimbuspay.com to nimbuspay.io; the Twilio messaging service still pointed at the old URL, and the redirect did not cover POST.",
+    "timeline": [
+      {
+        "time": "2026-07-03T11:12:00+05:30",
+        "event": "Twilio error alert fired."
+      },
+      {
+        "time": "2026-07-03T11:24:00+05:30",
+        "event": "Aiko found 404s on the old hooks domain."
+      },
+      {
+        "time": "2026-07-03T11:42:00+05:30",
+        "event": "Updated the status callback URL in the Twilio console."
+      },
+      {
+        "time": "2026-07-03T12:10:00+05:30",
+        "event": "Backfilled statuses from the Twilio API; resolved."
+      }
+    ],
+    "attempts": [
+      {
+        "action": "Updated the Twilio status callback to hooks.nimbuspay.io",
+        "outcome": "worked",
+        "notes": "New callbacks succeeded."
+      }
+    ],
+    "fix": "Pointed Twilio at the new webhook domain and backfilled statuses.",
+    "follow_ups": [
+      "Manage Twilio webhook config in Terraform."
+    ],
+    "ttr_minutes": 58
+  },
+  {
+    "incident_id": "INC-022",
+    "summary": "During a merchant's flash sale, 26% of payment intent creations failed with Stripe 429s for 44 minutes.",
+    "root_cause": "checkout-web created a new PaymentIntent on every render of the payment step and retried failures immediately up to 5 times. The flash sale pushed request rate above the Stripe account limit, and the retries kept it there. Same pattern as the SendGrid incident INC-011.",
+    "timeline": [
+      {
+        "time": "2026-07-08T19:03:00+05:30",
+        "event": "Payment failure alert fired."
+      },
+      {
+        "time": "2026-07-08T19:08:00+05:30",
+        "event": "Rahul saw StripeRateLimitError 429s."
+      },
+      {
+        "time": "2026-07-08T19:12:00+05:30",
+        "event": "A teammate suggested raising client retries; Rahul remembered INC-011 and declined."
+      },
+      {
+        "time": "2026-07-08T19:18:00+05:30",
+        "event": "Deployed a fix to reuse the PaymentIntent per cart instead of creating one per render."
+      },
+      {
+        "time": "2026-07-08T19:27:00+05:30",
+        "event": "Added exponential backoff with jitter and a server-side queue for intent creation."
+      },
+      {
+        "time": "2026-07-08T19:47:00+05:30",
+        "event": "Failure rate below 0.5%; resolved."
+      }
+    ],
+    "attempts": [
+      {
+        "action": "Reused PaymentIntents per cart",
+        "outcome": "partial",
+        "notes": "Cut request volume by about 60%."
+      },
+      {
+        "action": "Exponential backoff with jitter plus a queue for intent creation",
+        "outcome": "worked",
+        "notes": "429s stopped."
+      }
+    ],
+    "fix": "Reused PaymentIntents per cart and added exponential backoff with jitter plus queueing.",
+    "follow_ups": [
+      "Share the backoff-and-queue client between checkout-web and notifications-svc."
+    ],
+    "ttr_minutes": 44
+  },
+  {
+    "incident_id": "INC-023",
+    "summary": "Logins failed for 39 minutes because the auth-service certificate expired exactly 90 days after the manual renewal in INC-008.",
+    "root_cause": "The INC-008 follow-up to move to cert-manager was never done. The manual Let's Encrypt certificate expired again after 90 days, and the 14-day expiry alert was also never created.",
+    "timeline": [
+      {
+        "time": "2026-07-14T05:35:00+05:30",
+        "event": "Probe alert fired."
+      },
+      {
+        "time": "2026-07-14T05:39:00+05:30",
+        "event": "Daniel found INC-008: same error, 90 days earlier."
+      },
+      {
+        "time": "2026-07-14T05:46:00+05:30",
+        "event": "Started the manual certbot renewal from INC-008."
+      },
+      {
+        "time": "2026-07-14T05:55:00+05:30",
+        "event": "Instead installed cert-manager with a Let's Encrypt ClusterIssuer and a Certificate for auth.nimbuspay.io."
+      },
+      {
+        "time": "2026-07-14T06:08:00+05:30",
+        "event": "cert-manager issued the certificate and updated the secret."
+      },
+      {
+        "time": "2026-07-14T06:14:00+05:30",
+        "event": "Logins recovered; resolved."
+      }
+    ],
+    "attempts": [
+      {
+        "action": "Manual certbot renewal as in INC-008",
+        "outcome": "partial",
+        "notes": "Would have worked for another 90 days only; abandoned halfway."
+      },
+      {
+        "action": "Installed cert-manager with automatic renewal",
+        "outcome": "worked",
+        "notes": "Certificate issued and will renew 30 days before expiry."
+      }
+    ],
+    "fix": "cert-manager now issues and auto-renews the auth-service certificate.",
+    "follow_ups": [
+      "Move every remaining certificate to cert-manager.",
+      "Create the certificate expiry alert from INC-008."
+    ],
+    "ttr_minutes": 39
+  },
+  {
+    "incident_id": "INC-024",
+    "summary": "8% of settlement webhooks from the partner bank were rejected for 47 minutes because one node's clock had drifted by 5 minutes.",
+    "root_cause": "chronyd had crashed on one node after an OS patch, so its clock drifted. Pods on that node rejected signed webhooks with a 300 s tolerance.",
+    "timeline": [
+      {
+        "time": "2026-07-18T09:26:00+05:30",
+        "event": "Rejection alert fired."
+      },
+      {
+        "time": "2026-07-18T09:41:00+05:30",
+        "event": "Sofia saw all rejections came from pods on one node."
+      },
+      {
+        "time": "2026-07-18T09:48:00+05:30",
+        "event": "Found the clock 312 s behind and chronyd dead."
+      },
+      {
+        "time": "2026-07-18T09:53:00+05:30",
+        "event": "Cordoned and drained the node."
+      },
+      {
+        "time": "2026-07-18T10:13:00+05:30",
+        "event": "Bank retried the webhooks; resolved."
+      }
+    ],
+    "attempts": [
+      {
+        "action": "Drained the node with the skewed clock",
+        "outcome": "worked",
+        "notes": "Rejections stopped."
+      }
+    ],
+    "fix": "Drained the node and replaced it.",
+    "follow_ups": [
+      "Alert on node clock offset above 1 s."
+    ],
+    "ttr_minutes": 47
+  },
+  {
+    "incident_id": "INC-025",
+    "summary": "34% of payments-api requests failed for 36 minutes when a migration took an ACCESS EXCLUSIVE lock on refunds at lunch peak.",
+    "root_cause": "A hotfix migration adding a foreign key to refunds was run by hand from a laptop during peak hours, skipping the off-peak runner built after INC-004 and INC-015, so there was no lock_timeout.",
+    "timeline": [
+      {
+        "time": "2026-07-22T13:05:00+05:30",
+        "event": "5xx alert fired at 34%."
+      },
+      {
+        "time": "2026-07-22T13:09:00+05:30",
+        "event": "Priya found LockNotAvailable on refunds."
+      },
+      {
+        "time": "2026-07-22T13:13:00+05:30",
+        "event": "Found INC-004 and INC-015: do not kill the migration first, it makes things worse."
+      },
+      {
+        "time": "2026-07-22T13:15:00+05:30",
+        "event": "Asked the engineer running the migration to cancel it cleanly from their session."
+      },
+      {
+        "time": "2026-07-22T13:24:00+05:30",
+        "event": "Lock released after the rollback."
+      },
+      {
+        "time": "2026-07-22T13:41:00+05:30",
+        "event": "Error rate normal; resolved."
+      }
+    ],
+    "attempts": [
+      {
+        "action": "Cancelled the migration from its own session instead of pg_terminate_backend",
+        "outcome": "worked",
+        "notes": "Clean rollback with no automatic retry."
+      },
+      {
+        "action": "Re-ran the migration at 02:00 with lock_timeout 2s and NOT VALID constraint",
+        "outcome": "worked",
+        "notes": "Completed in the off-peak window with no impact."
+      }
+    ],
+    "fix": "Cancelled the migration and re-ran it off-peak with SET lock_timeout = '2s' and the constraint added as NOT VALID then validated.",
+    "follow_ups": [
+      "Block production DDL outside the migration runner with a Postgres role change."
+    ],
+    "ttr_minutes": 36
+  },
+  {
+    "incident_id": "INC-026",
+    "summary": "Transaction search returned no results for 41 minutes because the reindex job swapped the alias before copying finished.",
+    "root_cause": "The reindex script ran the _reindex call with wait_for_completion=false and swapped the transactions alias immediately to the new, still empty index.",
+    "timeline": [
+      {
+        "time": "2026-07-27T16:48:00+05:30",
+        "event": "Zero-result alert fired."
+      },
+      {
+        "time": "2026-07-27T16:55:00+05:30",
+        "event": "Grace saw the alias pointing to transactions-v9 with 0 documents."
+      },
+      {
+        "time": "2026-07-27T16:59:00+05:30",
+        "event": "Pointed the alias back to transactions-v8."
+      },
+      {
+        "time": "2026-07-27T17:29:00+05:30",
+        "event": "Reindex finished, alias swapped properly; resolved."
+      }
+    ],
+    "attempts": [
+      {
+        "action": "Swapped the alias back to transactions-v8",
+        "outcome": "worked",
+        "notes": "Search results returned immediately."
+      }
+    ],
+    "fix": "Reverted the alias and fixed the script to wait for the reindex task and compare document counts.",
+    "follow_ups": [
+      "Add a document-count check before any alias swap."
+    ],
+    "ttr_minutes": 41
+  },
+  {
+    "incident_id": "INC-027",
+    "summary": "For 33 minutes, JPY charges were created at 100 times the correct amount. 62 customers were overcharged and refunded.",
+    "root_cause": "A new amount helper converted all currencies to minor units by multiplying by 100, but JPY is a zero-decimal currency.",
+    "timeline": [
+      {
+        "time": "2026-07-31T12:20:00+05:30",
+        "event": "Amount anomaly alert fired."
+      },
+      {
+        "time": "2026-07-31T12:26:00+05:30",
+        "event": "Aiko confirmed 450000 JPY for a 4500 JPY cart."
+      },
+      {
+        "time": "2026-07-31T12:29:00+05:30",
+        "event": "Disabled JPY in the currency allowlist to stop new charges."
+      },
+      {
+        "time": "2026-07-31T12:38:00+05:30",
+        "event": "Rolled back the payments-api release."
+      },
+      {
+        "time": "2026-07-31T12:53:00+05:30",
+        "event": "Verified correct amounts and refunded affected charges; resolved."
+      }
+    ],
+    "attempts": [
+      {
+        "action": "Disabled JPY payments",
+        "outcome": "worked",
+        "notes": "Stopped new overcharges."
+      },
+      {
+        "action": "Rolled back the payments-api release",
+        "outcome": "worked",
+        "notes": "Amounts correct again."
+      }
+    ],
+    "fix": "Rolled back and fixed the helper to use ISO 4217 minor-unit exponents.",
+    "follow_ups": [
+      "Property tests for amount conversion across zero-decimal and three-decimal currencies."
+    ],
+    "ttr_minutes": 33
+  },
+  {
+    "incident_id": "INC-028",
+    "summary": "notifications-svc crash-looped with OOMKilled for 61 minutes. The Renovate bot had bumped template-cache to 2.5.1 within the caret range pinned in INC-019.",
+    "root_cause": "INC-019 pinned template-cache with ^2.3.4, which still allows 2.5.x. Renovate merged 2.5.1, which has the same unbounded Map as 2.4.0.",
+    "timeline": [
+      {
+        "time": "2026-08-05T08:55:00+05:30",
+        "event": "CrashLoop alert fired."
+      },
+      {
+        "time": "2026-08-05T09:00:00+05:30",
+        "event": "Rahul raised the memory limit from 512Mi to 1Gi to buy time."
+      },
+      {
+        "time": "2026-08-05T09:13:00+05:30",
+        "event": "Pods still crashing, just later. Found INC-019."
+      },
+      {
+        "time": "2026-08-05T09:21:00+05:30",
+        "event": "package-lock showed template-cache 2.5.1 from a Renovate PR on 4 August."
+      },
+      {
+        "time": "2026-08-05T09:29:00+05:30",
+        "event": "Pinned template-cache to exactly 2.3.4 and added a Renovate ignore rule."
+      },
+      {
+        "time": "2026-08-05T09:56:00+05:30",
+        "event": "Memory flat; resolved."
+      }
+    ],
+    "attempts": [
+      {
+        "action": "Raised the memory limit from 512Mi to 1Gi",
+        "outcome": "failed",
+        "notes": "Same as INC-009 and INC-019: only delays the crash."
+      },
+      {
+        "action": "Pinned template-cache to exactly 2.3.4 with a Renovate ignore rule",
+        "outcome": "worked",
+        "notes": "Memory flat at about 180 MB."
+      }
+    ],
+    "fix": "Pinned template-cache to the exact version 2.3.4 and blocked Renovate upgrades for it.",
+    "follow_ups": [
+      "Replace template-cache with a bounded LRU we own."
+    ],
+    "ttr_minutes": 61
+  },
+  {
+    "incident_id": "INC-029",
+    "summary": "Product thumbnails on checkout pages failed for 29 minutes after the base image moved to Node 22 without rebuilding the native sharp binary.",
+    "root_cause": "node_modules was cached from a Node 20 build layer, so sharp's native binary did not match the Node 22 runtime.",
+    "timeline": [
+      {
+        "time": "2026-08-07T15:10:00+05:30",
+        "event": "Image 500 alert fired."
+      },
+      {
+        "time": "2026-08-07T15:18:00+05:30",
+        "event": "Daniel found the sharp load error."
+      },
+      {
+        "time": "2026-08-07T15:23:00+05:30",
+        "event": "Rebuilt the image with the dependency cache cleared."
+      },
+      {
+        "time": "2026-08-07T15:39:00+05:30",
+        "event": "Thumbnails loading; resolved."
+      }
+    ],
+    "attempts": [
+      {
+        "action": "Rebuilt the container with a clean node_modules",
+        "outcome": "worked",
+        "notes": "sharp loaded correctly."
+      }
+    ],
+    "fix": "Rebuilt with a clean dependency layer and keyed the CI cache on the Node version.",
+    "follow_ups": [
+      "Include the Node version in the CI cache key for every service."
+    ],
+    "ttr_minutes": 29
+  },
+  {
+    "incident_id": "INC-030",
+    "summary": "payments-api p99 latency reached 4.1 s and 4% of charges timed out for 52 minutes during the night batch-charge window. Third occurrence of Redis client pool exhaustion (after INC-003 and INC-014).",
+    "root_cause": "The 01:50 deploy raised PAYMENTS_WORKER_CONCURRENCY from 8 to 16 for the new subscription billing batch. REDIS_MAX_POOL was still a fixed 20 because the follow-up from INC-003 and INC-014 was never done. Each worker thread holds up to 3 Redis connections at peak, so 16 threads need about 48.",
+    "timeline": [
+      {
+        "time": "2026-08-12T02:31:00+05:30",
+        "event": "Latency alert fired, p99 at 4.1 s."
+      },
+      {
+        "time": "2026-08-12T02:34:00+05:30",
+        "event": "Marcus saw redis.exceptions.ConnectionError: Too many connections."
+      },
+      {
+        "time": "2026-08-12T02:39:00+05:30",
+        "event": "Rolling restart of payments-api pods to clear stuck connections."
+      },
+      {
+        "time": "2026-08-12T02:50:00+05:30",
+        "event": "Latency back at 4 s within 9 minutes of the restart."
+      },
+      {
+        "time": "2026-08-12T02:55:00+05:30",
+        "event": "Found INC-003 and INC-014. Concurrency had been raised to 16 at 01:50."
+      },
+      {
+        "time": "2026-08-12T02:58:00+05:30",
+        "event": "Raised REDIS_MAX_POOL from 20 to 50 and rolled back PAYMENTS_WORKER_CONCURRENCY to 8."
+      },
+      {
+        "time": "2026-08-12T03:09:00+05:30",
+        "event": "Pool utilisation 34%, p99 at 420 ms."
+      },
+      {
+        "time": "2026-08-12T03:23:00+05:30",
+        "event": "Stable for 14 minutes; resolved."
+      }
+    ],
+    "attempts": [
+      {
+        "action": "Rolling restart of payments-api pods",
+        "outcome": "failed",
+        "notes": "Third time this has failed for this error (INC-003, INC-014). Pools refill within minutes."
+      },
+      {
+        "action": "Raised REDIS_MAX_POOL from 20 to 50 and rolled back worker concurrency to 8",
+        "outcome": "worked",
+        "notes": "Pool utilisation fell to 34% and latency recovered in about 11 minutes."
+      }
+    ],
+    "fix": "Raised REDIS_MAX_POOL from 20 to 50 and rolled back PAYMENTS_WORKER_CONCURRENCY to 8.",
+    "follow_ups": [
+      "Commit REDIS_MAX_POOL=50 to the Helm values; it was set with kubectl set env during the incident.",
+      "Add the pool utilisation alert first proposed in INC-003."
+    ],
+    "ttr_minutes": 52
+  },
+  {
+    "incident_id": "INC-031",
+    "summary": "ledger-worker lost 3 hours of refund events for 64 minutes of investigation because topic retention was shortened while the consumer was paused.",
+    "root_cause": "A cost-saving change set retention.ms on payments.refunded from 7 days to 2 hours while ledger-worker's refund consumer was paused for maintenance. The committed offsets were deleted and auto.offset.reset=latest skipped the gap.",
+    "timeline": [
+      {
+        "time": "2026-08-14T10:37:00+05:30",
+        "event": "Offset reset alert fired."
+      },
+      {
+        "time": "2026-08-14T10:51:00+05:30",
+        "event": "Sofia found retention.ms had been changed to 2 hours that morning."
+      },
+      {
+        "time": "2026-08-14T11:05:00+05:30",
+        "event": "Restored retention to 7 days."
+      },
+      {
+        "time": "2026-08-14T11:41:00+05:30",
+        "event": "Replayed the missing refunds from the payments-api outbox table; resolved."
+      }
+    ],
+    "attempts": [
+      {
+        "action": "Restored retention and replayed from the outbox table",
+        "outcome": "worked",
+        "notes": "Ledger matched after the replay."
+      }
+    ],
+    "fix": "Restored 7-day retention and replayed refunds from the outbox.",
+    "follow_ups": [
+      "Set auto.offset.reset=none on ledger consumers so gaps fail loudly."
+    ],
+    "ttr_minutes": 64
+  },
+  {
+    "incident_id": "INC-032",
+    "summary": "auth-service had zero ready replicas for about 6 minutes, and logins were degraded for 27 minutes, during an EKS node group AMI upgrade.",
+    "root_cause": "auth-service had no PodDisruptionBudget and all 3 replicas were on nodes in the same upgrade batch, so the drain evicted them together.",
+    "timeline": [
+      {
+        "time": "2026-08-18T22:05:00+05:30",
+        "event": "Availability alert fired."
+      },
+      {
+        "time": "2026-08-18T22:08:00+05:30",
+        "event": "Tomás paused the node group upgrade."
+      },
+      {
+        "time": "2026-08-18T22:11:00+05:30",
+        "event": "Replicas rescheduled and ready."
+      },
+      {
+        "time": "2026-08-18T22:32:00+05:30",
+        "event": "Added a PDB and topology spread, resumed the upgrade; resolved."
+      }
+    ],
+    "attempts": [
+      {
+        "action": "Paused the node group upgrade",
+        "outcome": "worked",
+        "notes": "Pods came back on remaining nodes."
+      }
+    ],
+    "fix": "Added a PodDisruptionBudget (minAvailable 2) and zone topology spread to auth-service.",
+    "follow_ups": [
+      "Require a PDB for every Deployment in the Helm linter."
+    ],
+    "ttr_minutes": 27
+  },
+  {
+    "incident_id": "INC-033",
+    "summary": "search-api latency rose to 2.8 s for 45 minutes after the HPA scaled it to its minimum of 1 replica because metrics-server was down.",
+    "root_cause": "metrics-server crashed after a certificate rotation. The HPA minReplicas was 1, so without metrics it scaled search-api to 1 pod during the evening peak.",
+    "timeline": [
+      {
+        "time": "2026-08-21T18:30:00+05:30",
+        "event": "Latency alert fired."
+      },
+      {
+        "time": "2026-08-21T18:39:00+05:30",
+        "event": "Priya saw 1 replica and HPA metric errors."
+      },
+      {
+        "time": "2026-08-21T18:43:00+05:30",
+        "event": "Scaled search-api to 6 replicas by hand."
+      },
+      {
+        "time": "2026-08-21T19:15:00+05:30",
+        "event": "Restarted metrics-server with a fixed cert; resolved."
+      }
+    ],
+    "attempts": [
+      {
+        "action": "Manually scaled search-api to 6 replicas",
+        "outcome": "worked",
+        "notes": "Latency recovered."
+      },
+      {
+        "action": "Restarted metrics-server with the new kubelet serving certificate",
+        "outcome": "worked",
+        "notes": "HPA working again."
+      }
+    ],
+    "fix": "Fixed metrics-server and raised search-api minReplicas to 3.",
+    "follow_ups": [
+      "Alert when any HPA reports FailedGetResourceMetric."
+    ],
+    "ttr_minutes": 45
+  },
+  {
+    "incident_id": "INC-034",
+    "summary": "ledger-cg lag reached 211,604 for 63 minutes after a ledger-worker deploy. Third time a batch-size change caused a rebalance storm (INC-007, INC-018).",
+    "root_cause": "An environment override in the production values file set LEDGER_BATCH_SIZE=3000, bypassing the config test added after INC-018, which only checked the default values file.",
+    "timeline": [
+      {
+        "time": "2026-08-26T14:14:00+05:30",
+        "event": "Consumer lag alert fired at 211,604."
+      },
+      {
+        "time": "2026-08-26T14:18:00+05:30",
+        "event": "Daniel checked the runbook, which links INC-007 and INC-018: do not scale up consumers."
+      },
+      {
+        "time": "2026-08-26T14:23:00+05:30",
+        "event": "Found LEDGER_BATCH_SIZE=3000 in values-prod.yaml from the 13:50 deploy."
+      },
+      {
+        "time": "2026-08-26T14:26:00+05:30",
+        "event": "Rolled back the batch-size config to 500."
+      },
+      {
+        "time": "2026-08-26T15:17:00+05:30",
+        "event": "Lag cleared; resolved."
+      }
+    ],
+    "attempts": [
+      {
+        "action": "Rolled back LEDGER_BATCH_SIZE to 500",
+        "outcome": "worked",
+        "notes": "Rebalances stopped within 2 minutes and lag drained."
+      }
+    ],
+    "fix": "Rolled back the batch-size config to 500 in values-prod.yaml.",
+    "follow_ups": [
+      "Run the batch-size config test against every environment values file."
+    ],
+    "ttr_minutes": 63
+  },
+  {
+    "incident_id": "INC-035",
+    "summary": "ledger-cg lag reached 58,210 for 72 minutes because one Kafka broker's EBS volume was degraded. No deploy was involved.",
+    "root_cause": "An AWS EBS degradation in ap-south-1a slowed disk I/O on broker kafka-2, which led 4 partitions of payments.settled. Fetches from those partitions stalled.",
+    "timeline": [
+      {
+        "time": "2026-08-29T07:50:00+05:30",
+        "event": "Lag alert fired."
+      },
+      {
+        "time": "2026-08-29T08:00:00+05:30",
+        "event": "Grace confirmed no ledger-worker deploy in the last 3 days, unlike INC-007 and INC-018."
+      },
+      {
+        "time": "2026-08-29T08:08:00+05:30",
+        "event": "Found high fetch latency only from kafka-2 and an AWS Health event."
+      },
+      {
+        "time": "2026-08-29T08:16:00+05:30",
+        "event": "Moved partition leadership off kafka-2 with a preferred replica election."
+      },
+      {
+        "time": "2026-08-29T09:02:00+05:30",
+        "event": "Lag cleared after AWS resolved the volume; resolved."
+      }
+    ],
+    "attempts": [
+      {
+        "action": "Moved partition leadership off broker kafka-2",
+        "outcome": "worked",
+        "notes": "Lag started draining immediately."
+      }
+    ],
+    "fix": "Shifted partition leadership away from the degraded broker until AWS recovered the volume.",
+    "follow_ups": [
+      "Alert on per-broker fetch latency."
+    ],
+    "ttr_minutes": 72
+  },
+  {
+    "incident_id": "INC-036",
+    "summary": "Two payments-api pods both ran the payout scheduler; a duplicate payout batch was caught before the bank file was sent. Investigation took 49 minutes.",
+    "root_cause": "The leader election lease duration was 15 s with a 10 s renew deadline, and a GC pause of 17 s on the leader let a second pod take over while the first continued.",
+    "timeline": [
+      {
+        "time": "2026-09-01T06:00:00+05:30",
+        "event": "Duplicate batch alert fired."
+      },
+      {
+        "time": "2026-09-01T06:08:00+05:30",
+        "event": "Rahul held the bank file export."
+      },
+      {
+        "time": "2026-09-01T06:21:00+05:30",
+        "event": "Found overlapping lease holders in the logs."
+      },
+      {
+        "time": "2026-09-01T06:35:00+05:30",
+        "event": "Deleted the duplicate batch."
+      },
+      {
+        "time": "2026-09-01T06:49:00+05:30",
+        "event": "Verified totals; resolved."
+      }
+    ],
+    "attempts": [
+      {
+        "action": "Held the bank file export and removed the duplicate batch",
+        "outcome": "worked",
+        "notes": "No duplicate payouts were sent."
+      }
+    ],
+    "fix": "Removed the duplicate batch and added a unique constraint on payout batch date.",
+    "follow_ups": [
+      "Use a database advisory lock as a second guard for the payout job."
+    ],
+    "ttr_minutes": 49
+  },
+  {
+    "incident_id": "INC-037",
+    "summary": "payments-api p99 latency reached 4.3 s and 3.8% of charges failed for 41 minutes at evening peak. Fourth Redis client pool exhaustion incident (INC-003, INC-014, INC-030).",
+    "root_cause": "The 20:55 Helm release reset REDIS_MAX_POOL to 20, because the INC-030 fix had been applied with kubectl set env and never committed to the Helm values. The same release raised PAYMENTS_WORKER_CONCURRENCY to 16 again for subscription billing.",
+    "timeline": [
+      {
+        "time": "2026-09-03T21:18:00+05:30",
+        "event": "Latency alert fired, p99 at 4.3 s."
+      },
+      {
+        "time": "2026-09-03T21:20:00+05:30",
+        "event": "Marcus recognised the error from INC-030."
+      },
+      {
+        "time": "2026-09-03T21:23:00+05:30",
+        "event": "Tomás, shadowing on-call, restarted the payments-api pods before the plan was agreed."
+      },
+      {
+        "time": "2026-09-03T21:32:00+05:30",
+        "event": "Latency back at 4.2 s after the restart, as in INC-030."
+      },
+      {
+        "time": "2026-09-03T21:35:00+05:30",
+        "event": "Found REDIS_MAX_POOL=20 in the running pods; the kubectl change from INC-030 was lost in the Helm release."
+      },
+      {
+        "time": "2026-09-03T21:37:00+05:30",
+        "event": "Raised REDIS_MAX_POOL from 20 to 50 and rolled back PAYMENTS_WORKER_CONCURRENCY to 8, this time in the Helm values."
+      },
+      {
+        "time": "2026-09-03T21:47:00+05:30",
+        "event": "p99 at 410 ms."
+      },
+      {
+        "time": "2026-09-03T21:59:00+05:30",
+        "event": "Stable; resolved."
+      }
+    ],
+    "attempts": [
+      {
+        "action": "Rolling restart of payments-api pods",
+        "outcome": "failed",
+        "notes": "Failed for the fourth time on this error (INC-003, INC-014, INC-030)."
+      },
+      {
+        "action": "Raised REDIS_MAX_POOL from 20 to 50 and rolled back worker concurrency to 8, committed to Helm values",
+        "outcome": "worked",
+        "notes": "Recovered in about 10 minutes, and the setting now survives releases."
+      }
+    ],
+    "fix": "Raised REDIS_MAX_POOL from 20 to 50 and rolled back PAYMENTS_WORKER_CONCURRENCY to 8, committed to the Helm chart values.",
+    "follow_ups": [
+      "Compute REDIS_MAX_POOL as 3 x PAYMENTS_WORKER_CONCURRENCY in the chart so they cannot drift apart.",
+      "Pool utilisation alert: open since INC-003.",
+      "Marcus is leaving Nimbus Pay at the end of September; hand over the payments Redis runbook."
+    ],
+    "ttr_minutes": 41
+  },
+  {
+    "incident_id": "INC-038",
+    "summary": "Checkout page load (LCP p75) rose to 6.2 s for 55 minutes after marketing added a synchronous A/B testing script.",
+    "root_cause": "The A/B vendor snippet was added in the tag manager as a blocking script in the head, and the vendor's CDN was slow in India that day.",
+    "timeline": [
+      {
+        "time": "2026-09-05T13:22:00+05:30",
+        "event": "Web vitals alert fired."
+      },
+      {
+        "time": "2026-09-05T13:40:00+05:30",
+        "event": "Sofia found a render-blocking script from the tag manager."
+      },
+      {
+        "time": "2026-09-05T13:53:00+05:30",
+        "event": "Disabled the tag in the tag manager."
+      },
+      {
+        "time": "2026-09-05T14:17:00+05:30",
+        "event": "LCP back to 1.9 s; resolved."
+      }
+    ],
+    "attempts": [
+      {
+        "action": "Disabled the A/B testing tag",
+        "outcome": "worked",
+        "notes": "LCP recovered."
+      }
+    ],
+    "fix": "Removed the tag; it came back later as an async script.",
+    "follow_ups": [
+      "Engineering review for tag manager changes on checkout pages."
+    ],
+    "ttr_minutes": 55
+  },
+  {
+    "incident_id": "INC-039",
+    "summary": "About 12,400 payout emails went out showing {{first_name}} for 31 minutes after a template rename.",
+    "root_cause": "The template was updated to use first_name, but the payout event still sent merchant_first_name, and the renderer only warns on missing variables.",
+    "timeline": [
+      {
+        "time": "2026-09-08T10:02:00+05:30",
+        "event": "Warning spike alert fired."
+      },
+      {
+        "time": "2026-09-08T10:09:00+05:30",
+        "event": "Aiko confirmed the raw variable in a sample email."
+      },
+      {
+        "time": "2026-09-08T10:13:00+05:30",
+        "event": "Paused the payout email queue."
+      },
+      {
+        "time": "2026-09-08T10:33:00+05:30",
+        "event": "Reverted the template and resumed; resolved."
+      }
+    ],
+    "attempts": [
+      {
+        "action": "Paused the queue and reverted the template",
+        "outcome": "worked",
+        "notes": "New emails rendered correctly."
+      }
+    ],
+    "fix": "Reverted the template; renderer now fails on missing variables in production.",
+    "follow_ups": [
+      "Contract tests between event payloads and templates."
+    ],
+    "ttr_minutes": 31
+  },
+  {
+    "incident_id": "INC-040",
+    "summary": "22% of emails failed for 37 minutes when a large merchant scheduled a 250,000-recipient campaign. Same SendGrid limit as INC-011.",
+    "root_cause": "Campaign sends went through the transactional path that still retried with a fixed 1 s delay; the shared backoff-and-queue client from INC-022 had only been adopted by checkout-web.",
+    "timeline": [
+      {
+        "time": "2026-09-10T18:40:00+05:30",
+        "event": "Send failure alert fired."
+      },
+      {
+        "time": "2026-09-10T18:45:00+05:30",
+        "event": "Priya found INC-011 and INC-022; skipped raising retries."
+      },
+      {
+        "time": "2026-09-10T18:52:00+05:30",
+        "event": "Routed campaign sends through the bulk queue at 50 messages per second."
+      },
+      {
+        "time": "2026-09-10T19:00:00+05:30",
+        "event": "Enabled exponential backoff with jitter honouring Retry-After in notifications-svc."
+      },
+      {
+        "time": "2026-09-10T19:17:00+05:30",
+        "event": "Failures under 0.2%; resolved."
+      }
+    ],
+    "attempts": [
+      {
+        "action": "Routed campaign sends through the throttled bulk queue",
+        "outcome": "worked",
+        "notes": "Stayed under the rate limit."
+      },
+      {
+        "action": "Enabled exponential backoff with jitter honouring Retry-After",
+        "outcome": "worked",
+        "notes": "Remaining 429s were absorbed."
+      }
+    ],
+    "fix": "Exponential backoff with jitter plus queueing for all SendGrid sends.",
+    "follow_ups": [
+      "Ask SendGrid for a higher limit before large campaigns."
+    ],
+    "ttr_minutes": 37
+  },
+  {
+    "incident_id": "INC-041",
+    "summary": "Users behind shared office IPs were locked out of login for 43 minutes after the password reset flow started counting towards the login rate limit.",
+    "root_cause": "The new password reset flow called the login endpoint internally, and the rate limiter keyed on client IP, so large offices behind one NAT hit 5 attempts per 15 minutes quickly.",
+    "timeline": [
+      {
+        "time": "2026-09-12T09:15:00+05:30",
+        "event": "Lockout alert fired."
+      },
+      {
+        "time": "2026-09-12T09:27:00+05:30",
+        "event": "Grace traced the extra attempts to the reset flow."
+      },
+      {
+        "time": "2026-09-12T09:35:00+05:30",
+        "event": "Raised the per-IP limit to 50 and keyed on user plus IP."
+      },
+      {
+        "time": "2026-09-12T09:58:00+05:30",
+        "event": "Lockouts gone; resolved."
+      }
+    ],
+    "attempts": [
+      {
+        "action": "Changed the rate limit key to user plus IP and raised the IP limit",
+        "outcome": "worked",
+        "notes": "Legitimate users could log in again."
+      }
+    ],
+    "fix": "Rate limiter keys on user plus IP, and the reset flow no longer calls the login endpoint.",
+    "follow_ups": [
+      "Add office NAT ranges to the rate limiter allowlist review."
+    ],
+    "ttr_minutes": 43
+  },
+  {
+    "incident_id": "INC-042",
+    "summary": "Merchant search p99 was 3.1 s for 48 minutes after a synonyms file with 40,000 entries was deployed.",
+    "root_cause": "The synonyms update expanded common words into dozens of terms at query time, making every query a large boolean query.",
+    "timeline": [
+      {
+        "time": "2026-09-14T20:05:00+05:30",
+        "event": "Latency alert fired."
+      },
+      {
+        "time": "2026-09-14T20:20:00+05:30",
+        "event": "Tomás found the synonyms deploy at 19:50."
+      },
+      {
+        "time": "2026-09-14T20:27:00+05:30",
+        "event": "Reverted to the previous synonyms file and reloaded the analyzers."
+      },
+      {
+        "time": "2026-09-14T20:53:00+05:30",
+        "event": "Latency normal; resolved."
+      }
+    ],
+    "attempts": [
+      {
+        "action": "Reverted the synonyms file",
+        "outcome": "worked",
+        "notes": "Latency back to 180 ms."
+      }
+    ],
+    "fix": "Reverted, then shipped a curated synonyms list of 1,200 entries.",
+    "follow_ups": [
+      "Benchmark synonyms changes in staging with production queries."
+    ],
+    "ttr_minutes": 48
+  },
+  {
+    "incident_id": "INC-043",
+    "summary": "payments-api logged request bodies with card BIN and last four digits at DEBUG level for 2 hours before detection; the incident was contained in 56 minutes.",
+    "root_cause": "A debugging session set LOG_LEVEL=DEBUG with a runtime override that was not reset, and DEBUG logging includes request bodies.",
+    "timeline": [
+      {
+        "time": "2026-09-16T11:48:00+05:30",
+        "event": "Log volume and DLP alerts fired."
+      },
+      {
+        "time": "2026-09-16T11:54:00+05:30",
+        "event": "Daniel set LOG_LEVEL back to INFO."
+      },
+      {
+        "time": "2026-09-16T12:13:00+05:30",
+        "event": "Security confirmed only BIN and last four were logged, no full card numbers."
+      },
+      {
+        "time": "2026-09-16T12:44:00+05:30",
+        "event": "Purged the affected log indices; resolved."
+      }
+    ],
+    "attempts": [
+      {
+        "action": "Reset LOG_LEVEL to INFO and purged affected logs",
+        "outcome": "worked",
+        "notes": "No further sensitive data logged."
+      }
+    ],
+    "fix": "Reset logging and purged the affected indices; DEBUG no longer logs request bodies.",
+    "follow_ups": [
+      "Redact card fields in the logging middleware at every level."
+    ],
+    "ttr_minutes": 56
+  },
+  {
+    "incident_id": "INC-044",
+    "summary": "All payments.captured events went to the dead-letter topic for 39 minutes because a producer started sending plain JSON instead of Avro.",
+    "root_cause": "A payments-api refactor switched the captured-event producer to a JSON serializer by mistake, so messages lacked the schema registry magic byte.",
+    "timeline": [
+      {
+        "time": "2026-09-18T16:33:00+05:30",
+        "event": "Dead-letter alert fired."
+      },
+      {
+        "time": "2026-09-18T16:42:00+05:30",
+        "event": "Priya saw Unknown magic byte! on every message."
+      },
+      {
+        "time": "2026-09-18T16:49:00+05:30",
+        "event": "Rolled back the payments-api producer change."
+      },
+      {
+        "time": "2026-09-18T17:12:00+05:30",
+        "event": "Replayed the dead-letter topic; resolved."
+      }
+    ],
+    "attempts": [
+      {
+        "action": "Rolled back the producer change and replayed the dead-letter topic",
+        "outcome": "worked",
+        "notes": "All events processed."
+      }
+    ],
+    "fix": "Rolled back the serializer change and replayed dead-lettered events.",
+    "follow_ups": [
+      "Schema compatibility check in the payments-api CI pipeline."
+    ],
+    "ttr_minutes": 39
+  },
+  {
+    "incident_id": "INC-045",
+    "summary": "7% of returning customers got checkout errors for 46 minutes because a service worker kept serving an old JavaScript bundle.",
+    "root_cause": "The service worker used a cache-first strategy for index.html, so returning users loaded the old bundle that sent a removed field.",
+    "timeline": [
+      {
+        "time": "2026-09-20T12:05:00+05:30",
+        "event": "Version mismatch alert fired."
+      },
+      {
+        "time": "2026-09-20T12:19:00+05:30",
+        "event": "Rahul matched the errors to bundle v412."
+      },
+      {
+        "time": "2026-09-20T12:27:00+05:30",
+        "event": "Shipped a service worker update with skipWaiting and network-first for index.html."
+      },
+      {
+        "time": "2026-09-20T12:51:00+05:30",
+        "event": "Old bundle sessions under 0.5%; resolved."
+      }
+    ],
+    "attempts": [
+      {
+        "action": "Shipped a network-first service worker with skipWaiting",
+        "outcome": "worked",
+        "notes": "Clients picked up the new bundle."
+      }
+    ],
+    "fix": "Network-first caching for index.html and a server-side shim for the old field.",
+    "follow_ups": [
+      "Keep the API backward compatible for two bundle versions."
+    ],
+    "ttr_minutes": 46
+  }
+]
