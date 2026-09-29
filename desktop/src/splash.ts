@@ -6,7 +6,7 @@ export const SPLASH_HTML = `<!DOCTYPE html>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
-      background: #000000;
+      background: #101010;
       color: #EDEDED;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
       height: 100vh;
@@ -19,21 +19,32 @@ export const SPLASH_HTML = `<!DOCTYPE html>
       overflow: hidden;
     }
     .card {
+      position: relative;
       text-align: center;
       width: 440px;
       padding: 40px 36px;
       border-radius: 26px;
-      background:
-        radial-gradient(140% 90% at 0% 0%, rgba(255, 255, 255, 0.08), transparent 55%),
-        linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.015));
+      background: #101010;
       box-shadow:
-        inset 1px 1px 0 rgba(255, 255, 255, 0.22),
-        inset -1px -1px 0 rgba(255, 255, 255, 0.07),
-        inset 0 0 0 1px rgba(255, 255, 255, 0.06),
-        0 30px 80px rgba(0, 0, 0, 0.8);
+        inset 0 1px 0 rgba(255, 255, 255, 0.06),
+        inset 0 0 32px rgba(255, 255, 255, 0.015),
+        0 30px 80px rgba(0, 0, 0, 0.9);
       display: flex;
       flex-direction: column;
       align-items: center;
+    }
+    /* Liquid glass rim: a 1px gradient edge, bright where light catches the top-left and bottom-right corners. */
+    .card::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      border-radius: inherit;
+      padding: 1px;
+      pointer-events: none;
+      background: linear-gradient(135deg, rgba(255, 255, 255, 0.55), rgba(255, 255, 255, 0.12) 20%, rgba(255, 255, 255, 0.03) 48%, rgba(255, 255, 255, 0.03) 62%, rgba(255, 255, 255, 0.14) 84%, rgba(255, 255, 255, 0.34));
+      -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+      -webkit-mask-composite: xor;
+      mask-composite: exclude;
     }
     .badge {
       display: inline-flex;
@@ -45,17 +56,17 @@ export const SPLASH_HTML = `<!DOCTYPE html>
       text-transform: uppercase;
       letter-spacing: 0.05em;
       border-radius: 9999px;
-      background: rgba(59, 130, 246, 0.12);
-      color: #60A5FA;
-      border: 1px solid rgba(59, 130, 246, 0.25);
+      background: rgba(20, 184, 166, 0.1);
+      color: #2DD4BF;
+      border: 1px solid rgba(20, 184, 166, 0.25);
       margin-bottom: 20px;
     }
     .dot {
       width: 6px;
       height: 6px;
       border-radius: 50%;
-      background: #3B82F6;
-      box-shadow: 0 0 8px #3B82F6;
+      background: #14B8A6;
+      box-shadow: 0 0 8px #14B8A6;
       animation: pulse 1.5s infinite;
     }
     @keyframes pulse {
@@ -83,8 +94,8 @@ export const SPLASH_HTML = `<!DOCTYPE html>
     .spinner-ring {
       position: absolute;
       inset: 0;
-      border: 3px solid #1F2937;
-      border-top-color: #3B82F6;
+      border: 3px solid rgba(255, 255, 255, 0.08);
+      border-top-color: #14B8A6;
       border-radius: 50%;
       animation: spin 0.9s cubic-bezier(0.55, 0.15, 0.45, 0.85) infinite;
     }

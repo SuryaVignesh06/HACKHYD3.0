@@ -1,11 +1,11 @@
-// What the console shows before an incident is open: a welcome with live memory numbers and one-click demos,
-// and a snapshot of what the team's memory holds. Every number comes from /api/memory/overview.
+import { Suspense, useState } from "react";
 import { motion } from "framer-motion";
 import { ArrowRight, Radio, Sparkles } from "lucide-react";
 import { desktop, shortcutLabel } from "../lib/desktop";
 import { dateWithAge } from "../lib/format";
 import type { MemoryOverview } from "../lib/types";
 import type { DemoChoice } from "./AlertInput";
+import FluidGlass from "./FluidGlass";
 import { IncidentChip } from "./IncidentPeek";
 import Orb, { ORB } from "./Orb";
 import { Kbd, SeverityBadge } from "./ui";
@@ -17,6 +17,7 @@ export function ConsoleHero({ overview, demos, memoryOn, onDiagnose, onSimulate 
   onDiagnose: (demo: DemoChoice) => void;
   onSimulate: (demo: DemoChoice) => void;
 }) {
+  const [heroMode, setHeroMode] = useState<"fluid" | "orb">("fluid");
   const t = overview?.totals;
   const stats: [string, number | string, string][] = t
     ? [
@@ -31,10 +32,46 @@ export function ConsoleHero({ overview, demos, memoryOn, onDiagnose, onSimulate 
   return (
     <div className="glass flex flex-1 flex-col items-center justify-center gap-6 overflow-y-auto px-8 py-8 text-center">
       <div className="flex flex-col items-center">
-        <motion.div initial={{ scale: 0.6, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ type: "spring", stiffness: 220, damping: 16 }}>
-          <Orb size={140} density={90} {...(memoryOn ? ORB.idle : ORB.off)} />
-        </motion.div>
-        <h1 className="mt-2 text-2xl font-semibold tracking-tight text-ink">Ready when the pager is.</h1>
+        <div className="mb-3 flex items-center gap-1 rounded-full border border-white/[0.08] bg-white/[0.03] p-0.5 text-[11px]">
+          <button
+            type="button"
+            onClick={() => setHeroMode("fluid")}
+            className={`rounded-full px-2.5 py-0.5 transition-colors ${heroMode === "fluid" ? "bg-white/[0.14] text-ink font-medium shadow-sm" : "text-muted hover:text-ink"}`}
+          >
+            Fluid Glass
+          </button>
+          <button
+            type="button"
+            onClick={() => setHeroMode("orb")}
+            className={`rounded-full px-2.5 py-0.5 transition-colors ${heroMode === "orb" ? "bg-white/[0.14] text-ink font-medium shadow-sm" : "text-muted hover:text-ink"}`}
+          >
+            Orb
+          </button>
+        </div>
+
+        {heroMode === "fluid" ? (
+          <div className="relative h-[150px] w-full max-w-[260px] overflow-hidden rounded-2xl border border-white/[0.08] bg-[#101010] shadow-xl shadow-black/60">
+            <Suspense fallback={<div className="h-full w-full bg-[#101010] animate-pulse" />}>
+              <FluidGlass
+                mode="lens"
+                backgroundColor="#101010"
+                showContent={false}
+                lensProps={{
+                  scale: 0.24,
+                  ior: 1.15,
+                  thickness: 5,
+                  chromaticAberration: 0.1,
+                  anisotropy: 0.01,
+                }}
+              />
+            </Suspense>
+          </div>
+        ) : (
+          <motion.div initial={{ scale: 0.6, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ type: "spring", stiffness: 220, damping: 16 }}>
+            <Orb size={140} density={90} {...(memoryOn ? ORB.idle : ORB.off)} />
+          </motion.div>
+        )}
+        <h1 className="mt-3 text-2xl font-semibold tracking-tight text-ink">Ready when the pager is.</h1>
         <p className="mt-1.5 max-w-xl text-sm leading-relaxed text-muted">
           Paste an alert on the left or start a demo below.
           {desktop && (

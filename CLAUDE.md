@@ -312,9 +312,9 @@ The LLM cites attempts by reference (`INC-030#1`), and the backend maps each ref
 ## 9. Frontend design rules
 
 - **Look:** a dark SRE console in the style of Linear or Datadog, not a chatbot.
-  - Background: pure black `#000000`, with two barely visible light pools behind the glass (user decision, 2026-09-29)
-  - Cards: Apple-style "liquid glass": nearly clear, heavily blurred and saturated, with a bright specular rim on the top-left edge drawn by inset shadows. Use the `.glass` class (panels, cards), `.glass-strong` (overlay, drawers, toasts, tooltips) and `.glass-well` (inputs, code, logs inside glass), all defined in `frontend/src/index.css`. Do not hand-roll other card backgrounds.
-  - Borders: the rim highlights built into the glass classes; plain borders are white at 6 to 10% opacity
+  - Background: pure black `#000000`, no colour pools (user decision, 2026-09-29: "everything pure dark black")
+  - Cards: pure black fill with an Apple-style "liquid glass" outline: a 1px gradient rim (`::after` with a mask) bright at the top-left and bottom-right corners, an inner top highlight, and backdrop blur so floating glass still lenses what is behind it. Use the `.glass` class (panels, cards), `.glass-strong` (overlay, drawers, toasts, tooltips) and `.glass-well` (inputs, code, logs inside glass), all defined in `frontend/src/index.css`. Do not hand-roll other card backgrounds.
+  - Borders: the gradient rim built into the glass classes; plain borders are white at 6 to 10% opacity
   - Text: ink `#EDEDED`, muted `#9A9A9A`
   - Severity accent: red `#EF4444`
   - Memory accent: teal `#14B8A6`

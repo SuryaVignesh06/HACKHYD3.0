@@ -36,13 +36,16 @@ function preload(): string {
   return join(__dirname, "preload.js");
 }
 
+const OVERLAY_WIDTH = 480;
+const OVERLAY_HEIGHT = 700;
+
 function createMainWindow(): void {
   mainWindow = new BrowserWindow({
     width: 1480,
     height: 920,
     minWidth: 1024,
     minHeight: 700,
-    backgroundColor: "#000000",
+    backgroundColor: "#101010",
     title: "On-Call Copilot",
     autoHideMenuBar: true,
     show: false,
@@ -58,15 +61,23 @@ function createMainWindow(): void {
 }
 
 function createOverlay(): void {
+  const display = screen.getPrimaryDisplay();
+  const x = Math.round(display.bounds.x + (display.bounds.width - OVERLAY_WIDTH) / 2);
+  const y = Math.round(display.bounds.y + (display.bounds.height - OVERLAY_HEIGHT) / 2.3);
+
   overlay = new BrowserWindow({
-    // Covers the whole display: Windows 11 acrylic blurs whatever is behind it, the page adds a dark tint, and the
-    // card floats in the middle. Acrylic needs an opaque window; a transparent one only shows a flat grey.
-    ...screen.getPrimaryDisplay().bounds,
+    // Siri-like hovering card: sized strictly to the card so Windows acrylic blurs ONLY
+    // the region directly behind the card, leaving the rest of the desktop sharp and visible.
+    x,
+    y,
+    width: OVERLAY_WIDTH,
+    height: OVERLAY_HEIGHT,
     frame: false,
-    transparent: false,
+    transparent: true,
     backgroundMaterial: "acrylic",
+    hasShadow: true,
     resizable: false,
-    movable: false,
+    movable: true,
     skipTaskbar: true,
     show: false,
     alwaysOnTop: true,
@@ -78,14 +89,32 @@ function createOverlay(): void {
   overlay.setAlwaysOnTop(true, "screen-saver");
   overlay.setVisibleOnAllWorkspaces(true);
   overlay.webContents.on("did-finish-load", () => broadcastShortcutStatus());
-  // Clicking outside the card or pressing Escape closes the overlay; an open incident is kept for when it comes back.
-  void overlay.loadURL(`${config.frontendUrl}/overlay`);
+  // The overlay is created before the frontend is up, so a failed load is retried until the page arrives.
+  overlay.webContents.on("did-fail-load", (_event, code, _description, _url, isMainFrame) => {
+    // -3 is ERR_ABORTED: a newer navigation replaced this one, so there is nothing to retry.
+    if (isMainFrame && code !== -3) setTimeout(() => loadOverlayPage(), 1000);
+  });
+  // Siri-like dismissal: clicking outside the card anywhere on the desktop dismisses the overlay.
+  overlay.on("blur", () => {
+    if (overlay && overlay.isVisible()) {
+      overlay.webContents.send("copilot:dismiss");
+    }
+  });
+
+  loadOverlayPage();
+}
+
+function loadOverlayPage(): void {
+  if (!overlay || overlay.isDestroyed()) return;
+  void overlay.loadURL(`${config.frontendUrl}/overlay`).catch(() => {});
 }
 
 function placeOverlay(): void {
   if (!overlay) return;
   const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
-  overlay.setBounds(display.bounds);
+  const x = Math.round(display.bounds.x + (display.bounds.width - OVERLAY_WIDTH) / 2);
+  const y = Math.round(display.bounds.y + (display.bounds.height - OVERLAY_HEIGHT) / 2.3);
+  overlay.setBounds({ x, y, width: OVERLAY_WIDTH, height: OVERLAY_HEIGHT });
 }
 
 /** Window-level fade, so the blurred backdrop eases in and out with the card. */
@@ -309,6 +338,10 @@ if (!app.requestSingleInstanceLock()) {
   void app.whenReady().then(async () => {
     warmUp();
     createMainWindow();
+    // The shortcut is registered straight away, not after the services start, so Ctrl+Space works even while the
+    // backend and frontend are still booting (or if their startup failed).
+    createOverlay();
+    registerShortcut();
 
     try {
       await startServices((status) => {
@@ -323,8 +356,6 @@ if (!app.requestSingleInstanceLock()) {
       if (mainWindow && !mainWindow.isDestroyed()) {
         await mainWindow.loadURL(config.frontendUrl);
       }
-      createOverlay();
-      registerShortcut();
       // Self-test only: run the exact shortcut handler once, since synthetic key presses from a
       // background process do not reach the interactive desktop's hotkey handler.
       if (config.captureDir) setTimeout(() => void activate(), 6000);

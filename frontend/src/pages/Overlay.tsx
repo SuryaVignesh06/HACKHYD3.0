@@ -462,20 +462,11 @@ export default function Overlay() {
 
   return (
     <div
-      className="fixed inset-0 flex items-center justify-center p-6"
+      className={desktop ? "relative flex h-screen w-screen flex-col overflow-hidden select-none bg-transparent" : "fixed inset-0 flex items-center justify-center p-6 bg-black/60 backdrop-blur-md"}
       onMouseDown={(e) => {
-        if (e.target === e.currentTarget && !sheet) dismiss();
+        if (!desktop && e.target === e.currentTarget && !sheet) dismiss();
       }}
     >
-      {/* dark tint over the OS blur, so the card text always reads cleanly */}
-      <motion.div
-        key={`tint-${openKey}`}
-        aria-hidden="true"
-        className={`pointer-events-none absolute inset-0 ${desktop ? "bg-black/60" : "bg-black/70 backdrop-blur-xl"}`}
-        initial={{ opacity: 0 }}
-        animate={{ opacity: closing ? 0 : 1 }}
-        transition={{ duration: 0.18 }}
-      />
       <AnimatePresence>
         {phase === "reading" && (
           <motion.div key="glow" className="screen-glow" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.3 }}>
@@ -489,22 +480,36 @@ export default function Overlay() {
       <motion.div
         key={openKey}
         layout
-        initial={{ opacity: 0, scale: 0.6, y: 18 }}
-        animate={closing ? { opacity: 0, scale: 0.9, y: 8 } : { opacity: 1, scale: 1, y: 0 }}
-        transition={closing ? { duration: 0.15, ease: [0.4, 0, 1, 1] } : { type: "spring", stiffness: 380, damping: 19, mass: 0.8, layout: { duration: 0.25, ease: [0.2, 0, 0, 1] } }}
+        initial={{ opacity: 0, scale: 0.94, y: 12 }}
+        animate={closing ? { opacity: 0, scale: 0.94, y: 8 } : { opacity: 1, scale: 1, y: 0 }}
+        transition={closing ? { duration: 0.15, ease: [0.4, 0, 1, 1] } : { type: "spring", stiffness: 380, damping: 22, mass: 0.8 }}
         onAnimationComplete={() => {
           if (closing) desktop?.hide();
         }}
-        className={`glass-strong relative flex max-h-[86vh] w-full flex-col overflow-hidden rounded-[30px] ${wide ? "max-w-[500px]" : "max-w-[420px]"}`}
+        className={`glass-strong glass-fluid relative flex flex-col overflow-hidden rounded-[26px] border border-white/[0.14] shadow-[0_24px_80px_rgba(0,0,0,0.85)] bg-[#101010]/85 ${
+          desktop ? "h-full w-full" : `max-h-[86vh] w-full ${wide ? "max-w-[500px]" : "max-w-[420px]"}`
+        }`}
       >
         {showHeader && (
-          <header className="flex shrink-0 items-center gap-2 px-4 pb-1 pt-3.5">
+          <header
+            className="flex shrink-0 items-center gap-2 px-4 pb-1 pt-3.5 select-none"
+            style={{ WebkitAppRegion: desktop ? "drag" : "no-drag" } as React.CSSProperties}
+          >
             {phase !== "home" && (
-              <button type="button" onClick={() => reset(activation)} className="btn btn-ghost !px-2 !py-1 text-xs" title="Start over">
+              <button
+                type="button"
+                onClick={() => reset(activation)}
+                className="btn btn-ghost !px-2 !py-1 text-xs"
+                style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
+                title="Start over"
+              >
                 <ChevronLeft className="h-4 w-4" aria-hidden="true" /> New
               </button>
             )}
-            <div className="ml-auto flex items-center gap-1.5">
+            <div
+              className="ml-auto flex items-center gap-1.5"
+              style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
+            >
               <label className="flex items-center gap-2 rounded-full bg-white/[0.05] py-1 pl-2.5 pr-1 text-[11px]" title="Memory on uses Hindsight; off answers from the error alone">
                 <span className={memoryOn ? "text-memory" : "text-muted"}>Memory</span>
                 <Switch on={memoryOn} onChange={setMemoryOn} label="Use team memory" disabled={phase === "working"} />

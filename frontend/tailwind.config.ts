@@ -5,9 +5,9 @@ export default {
   theme: {
     extend: {
       colors: {
-        // Pure black canvas, with Apple-style liquid glass surfaces (see .glass in index.css).
-        bg: "#000000",
-        surface: "rgba(255, 255, 255, 0.05)",
+        // Pure black obsidian #101010 canvas with Apple-style liquid glass surfaces
+        bg: "#101010",
+        surface: "rgba(255, 255, 255, 0.03)",
         border: "rgba(255, 255, 255, 0.10)",
         glass: "#777777",
         severity: "#EF4444",
