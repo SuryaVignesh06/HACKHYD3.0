@@ -1,0 +1,486 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>FRIDAY: the problem</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 1920px; height: 1080px; overflow: hidden; background: #050505; }
+  body { font-family: Inter, "Segoe UI", sans-serif; color: #f5f5f5; -webkit-font-smoothing: antialiased; }
+  .abs { position: absolute; }
+  .mono { font-family: "JetBrains Mono", Consolas, monospace; }
+  .scene { position: absolute; inset: 0; }
+  .card { border-radius: 16px; border: 1px solid rgba(255,255,255,0.1); background: linear-gradient(180deg, #16181c, #0d0e10);
+    box-shadow: 0 24px 60px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.06); padding: 16px 20px; }
+  .tag { font-size: 13px; font-weight: 600; letter-spacing: 0.18em; text-transform: uppercase; color: #9a9a9a; }
+  .big { font-weight: 600; letter-spacing: -0.03em; text-align: center; }
+  #caption { position: absolute; left: 50%; bottom: 44px; transform: translateX(-50%); width: 1560px; text-align: center; }
+  #caption .who { font-size: 13px; font-weight: 600; letter-spacing: 0.3em; color: #9a9a9a; margin-bottom: 10px; }
+  #caption .who b { color: #35d06f; font-weight: 600; }
+  #caption .text { font-size: 31px; font-weight: 500; line-height: 1.35; }
+  #caption .text span { color: rgba(245,245,245,0.28); }
+  #caption .text span.on { color: #f5f5f5; }
+  #caption .plate { position: absolute; left: -80px; right: -80px; top: -26px; bottom: -22px; z-index: -1;
+    background: radial-gradient(60% 100% at 50% 60%, rgba(0,0,0,0.85), rgba(0,0,0,0) 100%); }
+  #progress { position: absolute; left: 0; bottom: 0; height: 3px; background: linear-gradient(90deg, rgba(53,208,111,.2), #35d06f); }
+</style>
+</head>
+<body>
+<div id="stage"></div>
+<script>
+"use strict";
+const TL = /*TIMELINE*/null;
+const W = 1920, H = 1080;
+const stage = document.getElementById("stage");
+const svgNS = "http://www.w3.org/2000/svg";
+const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
+const lerp = (a, b, x) => a + (b - a) * x;
+const P = (t, a, d) => clamp((t - a) / d);
+const E = {
+  out: (x) => 1 - Math.pow(1 - clamp(x), 3),
+  inOut: (x) => { x = clamp(x); return x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2; },
+  back: (x) => { x = clamp(x); const c = 1.6; return 1 + (c + 1) * Math.pow(x - 1, 3) + c * Math.pow(x - 1, 2); },
+};
+const L = (id) => TL.lines.find((l) => l.id === id);
+function el(tag, cls, parent, html) {
+  const n = document.createElement(tag);
+  if (cls) n.className = cls;
+  if (html !== undefined) n.innerHTML = html;
+  (parent || stage).appendChild(n);
+  return n;
+}
+function at(n, x, y, w) { n.style.left = `${x}px`; n.style.top = `${y}px`; if (w) n.style.width = `${w}px`; return n; }
+function set(n, o = 1, x = 0, y = 0, s = 1, r = 0) {
+  n.style.opacity = o.toFixed(3);
+  n.style.transform = `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px) scale(${s.toFixed(4)}) rotate(${r.toFixed(2)}deg)`;
+  n.style.visibility = o <= 0.001 ? "hidden" : "visible";
+}
+function appear(n, t, a, out = Infinity, rise = 24, dur = 0.6) {
+  const i = E.out(P(t, a, dur));
+  set(n, i * (1 - P(t, out, 0.45)), 0, (1 - i) * rise);
+}
+function svg(parent, w, h, vb) {
+  const s = document.createElementNS(svgNS, "svg");
+  s.setAttribute("width", w); s.setAttribute("height", h); s.setAttribute("viewBox", vb || `0 0 ${w} ${h}`);
+  s.style.position = "absolute"; s.style.overflow = "visible";
+  parent.appendChild(s);
+  return s;
+}
+const ICON = {
+  check: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>',
+  x: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>',
+  lock: '<svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>',
+  db: '<svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></svg>',
+};
+
+// ------------------------------------------------------------------ the engineer: a flat illustration with live parts
+/** Seated engineer at a desk with a monitor. Returns handles for the animated parts. */
+function makeEngineer(parent, x, y, scale = 1) {
+  const wrap = at(el("div", "abs", parent), x, y);
+  wrap.style.transformOrigin = "0 0";
+  wrap.style.scale = String(scale);
+  const s = svg(wrap, 900, 620, "0 0 900 620");
+  s.innerHTML = `
+    <defs>
+      <radialGradient id="scr" cx="50%" cy="50%" r="70%"><stop offset="0" stop-color="#ff5a5a" stop-opacity=".95"/><stop offset="1" stop-color="#6b0f16"/></radialGradient>
+      <radialGradient id="spill" cx="50%" cy="50%" r="50%"><stop offset="0" stop-color="#ff4d4d" stop-opacity=".5"/><stop offset="1" stop-color="#ff4d4d" stop-opacity="0"/></radialGradient>
+      <linearGradient id="hood" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3a4150"/><stop offset="1" stop-color="#232833"/></linearGradient>
+    </defs>
+    <ellipse class="spill" cx="560" cy="250" rx="360" ry="260" fill="url(#spill)"/>
+    <!-- chair -->
+    <rect x="110" y="250" width="150" height="230" rx="40" fill="#15181e"/>
+    <rect x="175" y="470" width="20" height="90" fill="#101216"/><rect x="110" y="555" width="150" height="14" rx="7" fill="#101216"/>
+    <!-- body -->
+    <g class="body">
+      <path d="M150 470 C140 360 170 300 250 290 C320 282 360 320 372 380 L392 470 Z" fill="url(#hood)"/>
+      <path d="M300 330 C360 340 420 360 470 392 L462 420 C410 400 360 388 320 382 Z" fill="#2c323e"/>
+      <path d="M455 388 C475 384 492 392 498 404 C488 414 470 418 458 414 Z" fill="#d9a07c"/>
+      <g class="head">
+        <rect x="236" y="250" width="34" height="46" rx="12" fill="#c98f6b"/>
+        <ellipse cx="258" cy="210" rx="58" ry="64" fill="#d9a07c"/>
+        <path d="M200 205 C196 150 240 128 282 136 C318 142 330 176 318 200 C300 186 270 182 250 190 C232 196 214 214 206 232 Z" fill="#1a1a1d"/>
+        <ellipse class="ear" cx="214" cy="218" rx="10" ry="15" fill="#c98f6b"/>
+        <g class="eye"><ellipse cx="296" cy="214" rx="6" ry="7.5" fill="#1b1b1b"/></g>
+        <path class="brow" d="M284 196 L308 192" stroke="#1a1a1d" stroke-width="5" stroke-linecap="round"/>
+        <path class="mouth" d="M290 246 Q300 242 310 246" stroke="#7a4a36" stroke-width="4" fill="none" stroke-linecap="round"/>
+        <path class="sweat" d="M236 180 C232 188 230 194 236 198 C242 194 240 188 236 180 Z" fill="#9fd3ff"/>
+      </g>
+    </g>
+    <!-- desk -->
+    <rect x="360" y="420" width="520" height="22" rx="6" fill="#23262d"/>
+    <rect x="390" y="442" width="16" height="170" fill="#1a1c22"/><rect x="836" y="442" width="16" height="170" fill="#1a1c22"/>
+    <!-- mug -->
+    <rect x="780" y="376" width="40" height="46" rx="8" fill="#e8e8e8"/><path d="M820 386 C838 386 838 408 820 408" stroke="#e8e8e8" stroke-width="7" fill="none"/>
+    <path class="steam" d="M792 366 C786 352 800 344 794 330 M806 366 C800 352 814 344 808 330" stroke="#ffffff" stroke-opacity=".35" stroke-width="3" fill="none" stroke-linecap="round"/>
+    <!-- monitor -->
+    <rect x="520" y="400" width="80" height="20" fill="#2a2d34"/><rect x="552" y="330" width="16" height="74" fill="#2a2d34"/>
+    <rect x="430" y="160" width="260" height="180" rx="14" fill="#0b0c0f" stroke="#2f333b" stroke-width="6"/>
+    <rect class="screen" x="442" y="172" width="236" height="156" rx="8" fill="url(#scr)"/>
+    <g class="screenText" font-family="JetBrains Mono, monospace" font-size="13" fill="#fff">
+      <text x="456" y="198" font-weight="600">ERROR</text>
+      <rect x="456" y="210" width="200" height="6" rx="3" fill="#fff" opacity=".7"/><rect x="456" y="224" width="160" height="6" rx="3" fill="#fff" opacity=".55"/>
+      <rect x="456" y="238" width="185" height="6" rx="3" fill="#fff" opacity=".55"/><rect x="456" y="252" width="120" height="6" rx="3" fill="#fff" opacity=".45"/>
+      <rect x="456" y="266" width="170" height="6" rx="3" fill="#fff" opacity=".45"/><rect x="456" y="280" width="140" height="6" rx="3" fill="#fff" opacity=".4"/>
+    </g>
+    <!-- keyboard -->
+    <rect x="470" y="410" width="170" height="12" rx="4" fill="#3a3e47"/>`;
+  const q = (sel) => s.querySelector(sel);
+  const parts = { head: q(".head"), body: q(".body"), eye: q(".eye"), brow: q(".brow"), mouth: q(".mouth"), sweat: q(".sweat"),
+    screen: q(".screen"), spill: q(".spill"), steam: q(".steam"), screenText: q(".screenText") };
+  parts.head.style.transformOrigin = "255px 290px";
+  parts.body.style.transformOrigin = "260px 470px";
+  parts.eye.style.transformOrigin = "296px 214px";
+  return {
+    root: wrap,
+    /** mood: 0 stressed, 1 relieved; alarm: 0..1 red screen; calm screen shows green. */
+    update(t, { mood = 0, alarm = 1, look = 0 } = {}) {
+      const breathe = Math.sin(t * 2.2) * (mood < 0.5 ? 2.2 : 1.2);
+      parts.body.style.transform = `translateY(${breathe.toFixed(2)}px)`;
+      const nod = mood < 0.5 ? Math.sin(t * 1.3) * 2 + look * -6 : Math.sin(t * 0.8) * 1.2 - 2;
+      parts.head.style.transform = `rotate(${nod.toFixed(2)}deg)`;
+      const blink = (t % 3.7) < 0.12 ? 0.1 : 1;
+      parts.eye.style.transform = `scaleY(${blink})`;
+      parts.brow.setAttribute("d", mood < 0.5 ? "M282 192 L308 198" : "M284 194 L308 190");
+      parts.mouth.setAttribute("d", mood < 0.5 ? "M290 248 Q300 242 310 248" : "M288 242 Q300 254 312 242");
+      parts.sweat.style.opacity = (mood < 0.5 ? 0.35 + 0.5 * Math.abs(Math.sin(t * 1.7)) : 0).toFixed(2);
+      parts.sweat.style.transform = `translateY(${((t * 14) % 22).toFixed(1)}px)`;
+      const flicker = 0.85 + 0.15 * Math.sin(t * 9) * Math.sin(t * 3.1);
+      parts.screen.setAttribute("fill", alarm > 0.5 ? "url(#scr)" : "#0f3d25");
+      parts.screen.style.opacity = (alarm > 0.5 ? flicker : 1).toFixed(3);
+      parts.spill.style.opacity = (alarm > 0.5 ? 0.55 + 0.35 * Math.sin(t * 5) : 0.25).toFixed(3);
+      parts.spill.setAttribute("fill", alarm > 0.5 ? "url(#spill)" : "rgba(53,208,111,0.18)");
+      parts.screenText.style.opacity = alarm > 0.5 ? "1" : "0.5";
+      parts.steam.style.transform = `translateY(${(-((t * 8) % 12)).toFixed(1)}px)`;
+      parts.steam.style.opacity = (0.4 + 0.4 * Math.sin(t * 2)).toFixed(2);
+    },
+  };
+}
+
+/** Night window with moon and a wall clock reading 2:00. */
+function makeRoom(parent) {
+  const s = svg(parent, W, H);
+  s.innerHTML = `
+    <rect x="1330" y="140" width="380" height="300" rx="10" fill="#0a1020" stroke="#1d2433" stroke-width="10"/>
+    <line x1="1520" y1="140" x2="1520" y2="440" stroke="#1d2433" stroke-width="8"/><line x1="1330" y1="290" x2="1710" y2="290" stroke="#1d2433" stroke-width="8"/>
+    <circle cx="1620" cy="210" r="34" fill="#e9e6d6"/><circle cx="1606" cy="202" r="34" fill="#0a1020"/>
+    ${[...Array(14)].map((_, i) => `<circle class="star" cx="${1350 + ((i * 97) % 340)}" cy="${160 + ((i * 53) % 260)}" r="${1.5 + (i % 3) * 0.6}" fill="#fff"/>`).join("")}
+    <g transform="translate(260 170)"><circle r="70" fill="#101318" stroke="#2a2f38" stroke-width="8"/>
+      <line x1="0" y1="0" x2="0" y2="-46" stroke="#f5f5f5" stroke-width="6" stroke-linecap="round" class="minute"/>
+      <line x1="0" y1="0" x2="30" y2="-6" stroke="#ff4d4d" stroke-width="7" stroke-linecap="round"/>
+      <circle r="6" fill="#f5f5f5"/></g>
+    <rect x="0" y="880" width="1920" height="200" fill="#08090b"/>`;
+  return { stars: [...s.querySelectorAll(".star")], minute: s.querySelector(".minute"), root: s };
+}
+
+// ------------------------------------------------------------------ the FRIDAY orb
+function makeOrb(parent, size) {
+  const c = el("canvas", "abs", parent);
+  c.width = c.height = size;
+  const ctx = c.getContext("2d");
+  const pts = [];
+  for (let i = 0; i < 44; i++) for (let j = 0; j < 88; j++) {
+    const phi = ((i + 0.5) / 44 - 0.5) * Math.PI, th = (j / 88) * Math.PI * 2;
+    pts.push([Math.cos(phi) * Math.cos(th), Math.sin(phi), Math.cos(phi) * Math.sin(th), ((i * 7 + j * 13) % 17) / 17]);
+  }
+  return {
+    canvas: c,
+    draw(t, color = [255, 255, 255], energy = 1) {
+      ctx.clearRect(0, 0, size, size);
+      ctx.globalCompositeOperation = "lighter";
+      const R = size * 0.34, cx = size / 2, yaw = t * 0.3, ct = Math.cos(0.36), st = Math.sin(0.36);
+      const buckets = Array.from({ length: 10 }, () => []);
+      for (const [nx, ny, nz, rnd] of pts) {
+        const r = 1 + (Math.sin(nx * 5.5 + t * 1.3) * Math.cos(ny * 4.5 + t * 0.55) + 0.5 * Math.sin(nz * 6.5 - t * 0.9)) * 0.075 * energy;
+        const x = nx * r, y = ny * r, z = nz * r;
+        const x1 = x * Math.cos(yaw) + z * Math.sin(yaw), z1 = -x * Math.sin(yaw) + z * Math.cos(yaw);
+        const y2 = y * ct - z1 * st, z2 = y * st + z1 * ct;
+        const a = Math.max(Math.pow(1 - Math.abs(z2 / r), 3), 0.06) * (0.45 + rnd * 0.55) * (1 - Math.pow(Math.abs(ny), 8) * 0.85);
+        buckets[Math.min(9, Math.floor(a * 10))].push(cx + x1 * R, cx - y2 * R);
+      }
+      buckets.forEach((b, k) => {
+        ctx.fillStyle = `rgba(${color.join(",")},${((k + 0.5) / 10).toFixed(2)})`;
+        for (let n = 0; n < b.length; n += 2) ctx.fillRect(b[n], b[n + 1], 1.6, 1.6);
+      });
+    },
+  };
+}
+
+// ------------------------------------------------------------------ background, caption, framework
+const bg = at(el("div", "abs"), 0, 0, W); bg.style.height = `${H}px`;
+bg.style.background = "radial-gradient(80% 70% at 50% 40%, #0d0e11 0%, #050505 75%)";
+const layer = at(el("div", "abs"), 0, 0, W); layer.style.height = `${H}px`;
+const caption = el("div"); caption.id = "caption";
+caption.innerHTML = '<div class="plate"></div><div class="who"><b>00</b> &nbsp;THE PROBLEM</div><div class="text"></div>';
+const progress = el("div"); progress.id = "progress";
+let capLine = null;
+function drawCaption(t) {
+  const line = TL.lines.find((l) => t >= l.start - 0.25 && t <= l.end + 0.5) || null;
+  if (line !== capLine) {
+    capLine = line;
+    caption.querySelector(".text").innerHTML = line ? line.text.split(" ").map((w) => `<span>${w}</span>`).join(" ") : "";
+  }
+  if (!line) { caption.style.opacity = "0"; return; }
+  caption.style.opacity = Math.min(P(t, line.start - 0.25, 0.25), 1 - P(t, line.end + 0.25, 0.25)).toFixed(3);
+  const spans = caption.querySelectorAll(".text span");
+  const w = [...spans].map((s) => s.textContent.length + 2), total = w.reduce((a, b) => a + b, 0);
+  const done = P(t, line.start, line.end - line.start) * total;
+  let acc = 0;
+  spans.forEach((s, i) => { acc += w[i]; s.className = acc - w[i] * 0.6 <= done ? "on" : ""; });
+}
+const scenes = [];
+function scene(key, build) { const root = el("div", "scene", layer); scenes.push({ key, root, update: build(root) }); }
+
+// ================================================================== SCENES
+
+// p1: 2 AM, production breaks
+scene("p1", (root) => {
+  const room = makeRoom(root);
+  const eng = makeEngineer(root, 470, 250, 1.05);
+  const alert = at(el("div", "abs card mono", root, '<span style="color:#ff4d4d">&#9679;</span>&nbsp; [FIRING] PaymentsApiHighLatency &middot; SEV1'), 1180, 520);
+  alert.style.cssText += "font-size:20px;border-color:rgba(255,77,77,.5)";
+  const time = at(el("div", "abs", root, "2:00 AM"), 190, 270);
+  time.style.cssText += "font-size:44px;font-weight:600;letter-spacing:-.02em";
+  const s = L("p1").start;
+  return (t) => {
+    const alarm = t > s + 0.9 ? 1 : 0;
+    eng.update(t, { mood: 0, alarm });
+    room.stars.forEach((st, i) => st.setAttribute("opacity", (0.3 + 0.5 * Math.abs(Math.sin(t * 0.8 + i))).toFixed(2)));
+    room.minute.setAttribute("transform", `rotate(${(t * 6) % 360})`);
+    appear(time, t, s - 0.8);
+    const k = E.back(P(t, s + 0.9, 0.5));
+    set(alert, clamp(P(t, s + 0.9, 0.2)), 0, 0, lerp(0.7, 1, k), Math.sin(t * 30) * 1.5 * (1 - P(t, s + 1.3, 0.6)));
+    eng.root.style.translate = t > s + 0.9 && t < s + 1.4 ? `${(Math.sin(t * 60) * 5).toFixed(1)}px 0` : "0 0";
+  };
+});
+
+// p2: logs, Slack, docs, memory
+scene("p2", (root) => {
+  const eng = makeEngineer(root, 120, 300, 0.95);
+  const s = L("p2").start, e = L("p2").end, d = e - s;
+  const win = (x, y, w, title, body, color) => {
+    const n = at(el("div", "abs card", root), x, y, w);
+    n.innerHTML = `<div class="tag" style="color:${color}">${title}</div><div style="margin-top:10px;font-size:18px;line-height:1.5">${body}</div>`;
+    return n;
+  };
+  const logs = win(960, 110, 520, "Logs", '<span class="mono" style="font-size:15px;color:#ff8080">ERROR redis.exceptions.ConnectionError:<br>Too many connections</span><br><span class="mono" style="font-size:15px;color:#9a9a9a">14,382 lines &middot; last 15 min</span>', "#ff4d4d");
+  const slack = win(1220, 330, 560, "Slack search", '<span class="mono" style="font-size:16px">"redis too many connections"</span><div style="margin-top:8px;color:#9a9a9a;font-size:16px"># payments-oncall &middot; 5 months ago<br>&ldquo;I think we bumped something?&rdquo;</div>', "#c4b5fd");
+  const docs = win(940, 560, 500, "Documentation", '<div style="color:#9a9a9a;font-size:16px">Runbook: payments-api<br><span style="color:#fcd34d">Last updated 2025</span></div>', "#fcd34d");
+  const think = at(el("div", "abs card", root), 360, 120, 360);
+  think.innerHTML = '<div style="font-size:22px;line-height:1.4">&ldquo;How did we fix this<br>last time&hellip;?&rdquo;</div>';
+  think.style.borderRadius = "28px";
+  return (t) => {
+    eng.update(t, { mood: 0, alarm: 1, look: Math.sin(t * 1.4) });
+    appear(logs, t, s + d * 0.12, Infinity, 30);
+    appear(slack, t, s + d * 0.3, Infinity, 30);
+    appear(docs, t, s + d * 0.5, Infinity, 30);
+    appear(think, t, s + d * 0.68, Infinity, 20);
+    [logs, slack, docs].forEach((n, i) => { n.style.translate = `0 ${(Math.sin(t * 1.2 + i * 2) * 5).toFixed(1)}px`; });
+  };
+});
+
+// p3: scattered and forgotten
+scene("p3", (root) => {
+  const items = [["Incident INC-030", "#ff4d4d"], ["Slack thread", "#c4b5fd"], ["Postmortem", "#f5f5f5"], ["Failed fix", "#ff4d4d"], ["Code change", "#93c5fd"],
+    ["Runbook", "#fcd34d"], ["Working fix", "#35d06f"], ["Dashboard", "#93c5fd"], ["Retro notes", "#f5f5f5"], ["Old ticket", "#fcd34d"]];
+  const cards = items.map(([label, c], i) => {
+    const n = at(el("div", "abs card", root, `<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${c};margin-right:10px"></span>${label}`), 860, 380);
+    n.style.fontSize = "22px"; n.style.whiteSpace = "nowrap";
+    const a = (i / items.length) * Math.PI * 2 + 0.3;
+    return { n, dx: Math.cos(a) * (520 + (i % 3) * 90), dy: Math.sin(a) * (300 + (i % 2) * 60), r: ((i * 37) % 30) - 15 };
+  });
+  const title = at(el("div", "abs big", root, 'Knowledge is <span style="color:#ff4d4d">scattered</span><br>and <span style="color:#6b7280">forgotten</span>.'), 0, 330, W);
+  title.style.fontSize = "84px";
+  const s = L("p3").start, e = L("p3").end;
+  return (t) => {
+    const k = E.out(P(t, s - 0.3, 1.6));
+    const fade = P(t, s + 1.4, e - s);
+    cards.forEach(({ n, dx, dy, r }, i) => {
+      set(n, clamp(P(t, s - 0.3 + i * 0.05, 0.3)) * (1 - fade * 0.75), dx * k + Math.sin(t + i) * 8, dy * k, 1 - fade * 0.25, r * k);
+      n.style.filter = `blur(${(fade * 4).toFixed(1)}px)`;
+    });
+    appear(title, t, s + 0.8, Infinity, 30);
+  };
+});
+
+// p4: the experience exists, and engineers start from zero
+scene("p4", (root) => {
+  const line = at(el("div", "abs", root), 200, 400, 1520);
+  line.style.cssText += "height:3px;background:linear-gradient(90deg,rgba(255,255,255,.05),rgba(255,255,255,.35));transform-origin:0 50%";
+  const evs = [["Mar", "INC-003", "Restart pods", "failed"], ["May", "INC-014", "Redis failover", "failed"], ["Aug", "INC-030", "Pool 20 → 50", "worked"],
+    ["Sep", "INC-037", "Postmortem written", "worked"], ["Code", "PR #2291", "Concurrency 8 → 24", "change"]];
+  const cards = evs.map(([m, id, what, kind], i) => {
+    const c = kind === "failed" ? "#ff4d4d" : kind === "worked" ? "#35d06f" : "#93c5fd";
+    const n = at(el("div", "abs card", root), 200 + i * 310, i % 2 ? 440 : 190, 270);
+    n.innerHTML = `<div class="tag">${m}</div><div class="mono" style="margin-top:8px;font-size:18px">${id}</div>
+      <div style="margin-top:6px;font-size:19px;display:flex;gap:8px;align-items:center"><span style="color:${c}">${kind === "failed" ? ICON.x : ICON.check}</span>${what}</div>`;
+    return n;
+  });
+  const zero = at(el("div", "abs big", root, 'Same problem again. <span style="color:#ff4d4d">Start from zero.</span>'), 0, 690, W);
+  zero.style.fontSize = "56px";
+  const s = L("p4").start, e = L("p4").end, d = e - s;
+  return (t) => {
+    line.style.transform = `scaleX(${E.inOut(P(t, s - 0.3, 1.2)).toFixed(3)})`;
+    const reset = P(t, s + d * 0.72, 0.8);
+    cards.forEach((n, i) => {
+      const k = E.out(P(t, s + 0.3 + i * d * 0.1, 0.6));
+      set(n, k * (1 - reset * 0.8), 0, (1 - k) * 30, 1, 0);
+      n.style.filter = `grayscale(${reset}) blur(${(reset * 3).toFixed(1)}px)`;
+    });
+    appear(zero, t, s + d * 0.72, Infinity, 30);
+  };
+});
+
+// p5: generic AI vs what the team learned
+scene("p5", (root) => {
+  const chat = at(el("div", "abs card", root), 220, 190, 700);
+  chat.innerHTML = `<div class="tag">Generic AI assistant</div>
+    <div class="mono" style="margin-top:14px;font-size:16px;color:#ff8080">redis.exceptions.ConnectionError: Too many connections</div>
+    <div style="margin-top:16px;font-size:22px;line-height:1.5;padding:16px 18px;border-radius:14px;background:rgba(255,255,255,.05)">
+    This means Redis refused a connection. Try <b>restarting the service</b> or check your network.</div>
+    <div style="margin-top:14px;color:#9a9a9a;font-size:17px">Explains the error. Knows nothing about your team.</div>`;
+  const vault = at(el("div", "abs card", root), 1060, 190, 640);
+  vault.innerHTML = `<div class="tag" style="color:#35d06f">What your team already learned</div>
+    <div style="margin-top:16px;font-size:20px;line-height:2">
+    <div><span style="color:#ff4d4d">${ICON.x}</span> Restarting pods failed 4 times</div>
+    <div><span style="color:#35d06f">${ICON.check}</span> Raising the pool 20 → 50 worked</div>
+    <div><span style="color:#93c5fd">${ICON.check}</span> Caused by a concurrency change</div></div>`;
+  const lock = at(el("div", "abs", root, ICON.lock), 1340, 400);
+  lock.style.color = "#f5f5f5";
+  const s = L("p5").start, e = L("p5").end, d = e - s;
+  return (t) => {
+    appear(chat, t, s - 0.2, Infinity, 30);
+    const k = E.out(P(t, s + d * 0.5, 0.6));
+    set(vault, k, 0, (1 - k) * 30);
+    vault.style.filter = `blur(${(P(t, s + d * 0.75, 0.6) * 5).toFixed(1)}px)`;
+    const lk = E.back(P(t, s + d * 0.75, 0.5));
+    set(lock, clamp(P(t, s + d * 0.75, 0.2)), 0, 0, lerp(0.4, 1.6, lk));
+  };
+});
+
+// p6-p7: the gap
+scene("p6", (root) => {
+  const s6 = L("p6").start, s7 = L("p7").start, e7 = L("p7").end;
+  const g = svg(root, W, H);
+  g.innerHTML = `<path d="M0 620 L700 620 L760 1080 L0 1080 Z" fill="#0f1114" stroke="#23262d" stroke-width="3"/>
+    <path d="M1920 620 L1220 620 L1160 1080 L1920 1080 Z" fill="#0f1114" stroke="#23262d" stroke-width="3"/>`;
+  const org = at(el("div", "abs card", root), 170, 330, 420);
+  org.innerHTML = `<div style="color:#35d06f">${ICON.db}</div><div style="font-size:30px;font-weight:600;margin-top:10px">Organization memory</div><div style="color:#9a9a9a;font-size:18px;margin-top:6px">Every incident, fix and failure</div>`;
+  const engWrap = at(el("div", "abs", root), 1210, 150);
+  const eng = makeEngineer(engWrap, 0, 0, 0.72);
+  const gapLabel = at(el("div", "abs big", root, "The gap"), 0, 470, W);
+  gapLabel.style.cssText += "font-size:40px;color:#ff4d4d;letter-spacing:.3em;text-indent:.3em;text-transform:uppercase";
+  const quote = at(el("div", "abs big", root, 'The organization has memory,<br><span style="color:#9a9a9a">but the engineer can\'t access it when they need it most.</span>'), 0, 140, W);
+  quote.style.fontSize = "50px";
+  const dash = svg(root, W, H);
+  dash.innerHTML = '<line x1="600" y1="480" x2="1300" y2="480" stroke="#ff4d4d" stroke-width="4" stroke-dasharray="14 14" class="d"/>';
+  const d = dash.querySelector(".d");
+  return (t) => {
+    eng.update(t, { mood: 0, alarm: 1 });
+    appear(org, t, s6 - 0.2);
+    appear(engWrap, t, s6);
+    d.setAttribute("stroke-dashoffset", (-t * 40).toFixed(1));
+    dash.style.opacity = (P(t, s6 + 0.5, 0.5) * (0.6 + 0.4 * Math.sin(t * 4))).toFixed(2);
+    appear(gapLabel, t, s6 + 0.6, s7);
+    appear(quote, t, s7 - 0.1, Infinity, 20);
+    void e7;
+  };
+});
+
+// p8: FRIDAY
+scene("p8", (root) => {
+  const orb = makeOrb(root, 460);
+  at(orb.canvas, W / 2 - 230, 130);
+  const name = at(el("div", "abs big", root, "FRIDAY"), 0, 590, W);
+  name.style.cssText += "font-size:110px;font-weight:300;letter-spacing:.5em;text-indent:.5em";
+  const sub = at(el("div", "abs big", root, "Engineering memory, when you need it."), 0, 740, W);
+  sub.style.cssText += "font-size:32px;color:#9a9a9a;font-weight:400;letter-spacing:0";
+  const s = L("p8").start;
+  return (t) => {
+    orb.draw(t, [255, 255, 255], 1.2);
+    const k = E.out(P(t, s - 0.2, 1));
+    set(orb.canvas, k, 0, 0, lerp(0.6, 1, k));
+    appear(name, t, s + 0.5, Infinity, 30);
+    appear(sub, t, s + 1.1);
+  };
+});
+
+// p9: what FRIDAY does, bridging the gap
+scene("p9", (root) => {
+  const s = L("p9").start, e = L("p9").end, d = e - s;
+  const orb = makeOrb(root, 300);
+  at(orb.canvas, W / 2 - 150, 120);
+  const caps = [["Understands your screen", "Reads the error you are looking at", "#93c5fd"], ["Searches team experience", "Hindsight memory of past incidents", "#35d06f"],
+    ["Inspects the codebase", "Finds the file and line that matter", "#c4b5fd"], ["Answers from evidence", "What worked, and what failed, before", "#fcd34d"]];
+  const cards = caps.map(([h, sub, c], i) => {
+    const n = at(el("div", "abs card", root), 150 + i * 420, 470, 380);
+    n.innerHTML = `<div style="width:12px;height:12px;border-radius:50%;background:${c};box-shadow:0 0 14px ${c}"></div>
+      <div style="font-size:26px;font-weight:600;margin-top:16px">${h}</div><div style="color:#9a9a9a;font-size:18px;margin-top:8px">${sub}</div>`;
+    return { n, c };
+  });
+  const bridge = svg(root, W, H);
+  bridge.innerHTML = '<path class="b" d="M340 460 C600 380 1320 380 1580 460" stroke="#35d06f" stroke-width="3" fill="none" stroke-dasharray="1400" stroke-dashoffset="1400"/>';
+  const b = bridge.querySelector(".b");
+  const at4 = [0.18, 0.38, 0.58, 0.76];
+  return (t) => {
+    orb.draw(t, [150, 240, 180], 1.1);
+    set(orb.canvas, E.out(P(t, s - 0.3, 0.8)));
+    b.setAttribute("stroke-dashoffset", (1400 * (1 - E.inOut(P(t, s, d * 0.8)))).toFixed(0));
+    cards.forEach(({ n, c }, i) => {
+      appear(n, t, s + d * at4[i] - 0.3, Infinity, 30);
+      const lit = P(t, s + d * at4[i], 0.3);
+      n.style.borderColor = `rgba(255,255,255,${(0.1 + lit * 0.25).toFixed(2)})`;
+      n.style.boxShadow = `0 0 ${(40 * lit).toFixed(0)}px ${c}33, 0 24px 60px rgba(0,0,0,.55)`;
+    });
+  };
+});
+
+// p10: solved, and remembered
+scene("p10", (root) => {
+  const s = L("p10").start, e = L("p10").end, d = e - s;
+  const eng = makeEngineer(root, 100, 300, 0.95);
+  const check = at(el("div", "abs", root, ICON.check), 640, 250);
+  check.style.cssText += "color:#35d06f;width:90px;height:90px;border-radius:50%;background:rgba(53,208,111,.15);display:flex;align-items:center;justify-content:center;transform-origin:center";
+  check.querySelector("svg").setAttribute("width", "48"); check.querySelector("svg").setAttribute("height", "48");
+  const exp = at(el("div", "abs card", root), 900, 380, 420);
+  exp.innerHTML = `<div class="tag" style="color:#35d06f">New experience</div><div style="font-size:21px;margin-top:10px">Pool 20 → 50 fixed it</div><div style="color:#9a9a9a;font-size:17px;margin-top:6px">Restart did not</div>`;
+  const orb = makeOrb(root, 320);
+  at(orb.canvas, 1440, 290);
+  const mem = at(el("div", "abs", root, "FRIDAY remembers"), 1440, 620, 320);
+  mem.style.cssText += "text-align:center;font-size:26px;font-weight:600;color:#35d06f";
+  const end = at(el("div", "abs big", root, "Fix it once. <span style=\"color:#35d06f\">Remember it forever.</span>"), 0, 150, W);
+  end.style.fontSize = "64px";
+  return (t) => {
+    eng.update(t, { mood: 1, alarm: 0 });
+    set(check, clamp(P(t, s + 0.2, 0.2)), 0, 0, E.back(P(t, s + 0.2, 0.5)));
+    const fly = E.inOut(P(t, s + d * 0.45, 1.2));
+    set(exp, clamp(P(t, s + 0.5, 0.3)) * (1 - P(t, s + d * 0.45 + 1.0, 0.3)), fly * 620, fly * -20, lerp(1, 0.4, fly));
+    orb.draw(t, [150, 240, 180], 1 + P(t, s + d * 0.45 + 1.1, 0.3) * (1 - P(t, s + d * 0.45 + 1.6, 0.8)) * 1.5);
+    set(orb.canvas, E.out(P(t, s + 0.3, 0.6)));
+    appear(mem, t, s + d * 0.45 + 1.2);
+    appear(end, t, e + 0.6, Infinity, 30);
+    layer.style.opacity = (1 - P(t, TL.total - 0.8, 0.8)).toFixed(3);
+  };
+});
+
+scenes.forEach((sc) => { sc.from = L(sc.key).start - 0.45; });
+scenes[0].from = 0;
+scenes.forEach((sc, i) => { sc.to = i + 1 < scenes.length ? scenes[i + 1].from : TL.total + 1; });
+// p6 covers the p7 line too; the next scene after it starts at p8.
+
+window.render = (t) => {
+  for (const sc of scenes) {
+    const o = sc.key === "p1" ? 1 - P(t, sc.to - 0.25, 0.5) : Math.min(P(t, sc.from - 0.25, 0.5), 1 - P(t, sc.to - 0.25, 0.5));
+    if (o <= 0) { sc.root.style.display = "none"; continue; }
+    sc.root.style.display = "block";
+    sc.root.style.opacity = o.toFixed(3);
+    sc.update(t);
+  }
+  drawCaption(t);
+  progress.style.width = `${((t / TL.total) * 100).toFixed(2)}%`;
+  return true;
+};
+Promise.race([document.fonts.ready, new Promise((r) => setTimeout(r, 6000))]).then(() => { window.render(0); window.__ready = true; });
+</script>
+</body>
+</html>

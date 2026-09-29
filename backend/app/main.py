@@ -32,7 +32,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await llm.close()
 
 
-app = FastAPI(title="On-Call Copilot", version="0.3.0", lifespan=lifespan)
+app = FastAPI(title="FRIDAY", version="0.3.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,

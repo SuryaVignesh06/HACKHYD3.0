@@ -2,7 +2,7 @@
   "name": "oncall-copilot-desktop",
   "private": true,
   "version": "0.2.0",
-  "description": "On-Call Copilot desktop agent: global shortcut overlay backed by Hindsight memory",
+  "description": "FRIDAY desktop agent: global shortcut overlay backed by Hindsight memory",
   "main": "dist/main.js",
   "scripts": {
     "build": "tsc -p tsconfig.json",

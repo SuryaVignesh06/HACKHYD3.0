@@ -196,6 +196,9 @@ A dark SRE command centre, not a chatbot. Design rules are in `CLAUDE.md` sectio
 1. **DEMO-A:** `payments-api` p99 4.2 s, `redis.exceptions.ConnectionError: Too many connections`, concurrency raised 8 to 24. Strong match.
 2. **DEMO-B:** `ledger-worker` lag 184,322 on `ledger-cg` after a deploy. Matches the Kafka family.
 3. **DEMO-C:** `search-api` 502s after a CDN origin change (TLS SNI mismatch). No precedent. Its `follow_up_alert` is the same failure on **checkout-web**, worded differently, so the learning proof also shows the agent applying what it learned to a different service.
+4. **DEMO-D:** `notifications-svc` crash-looping with OOMKilled after a Renovate dependency update. Matches the memory leak family: raising the memory limit failed (INC-019, INC-028); pinning `template-cache` exactly worked. The alert never names the package.
+5. **DEMO-E:** `ledger-worker` postings failing with `LockNotAvailable` on `ledger_entries` during a deploy migration. The Postgres migration lock family on a service that never had it: `pg_terminate_backend` failed because the Job retried (INC-004, INC-015).
+6. **DEMO-F:** bank settlement webhooks rejected because the `hooks.nimbuspay.io` certificate expired. The TLS expiry family on a new host and service: manual certbot only buys 90 days; cert-manager worked (INC-023).
 
 Each demo alert has a `signals` script for the simulator.
 

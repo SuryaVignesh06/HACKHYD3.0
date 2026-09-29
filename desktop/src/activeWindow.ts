@@ -43,7 +43,7 @@ const waiting: ((value: ActiveWindow | null) => void)[] = [];
 
 function start(): void {
   if (process.platform !== "win32" || shell) return;
-  const scriptPath = join(tmpdir(), "oncall-copilot-foreground.ps1");
+  const scriptPath = join(tmpdir(), "friday-foreground.ps1");
   writeFileSync(scriptPath, SCRIPT, "utf-8");
   shell = spawn("powershell.exe", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", scriptPath], {
     windowsHide: true,

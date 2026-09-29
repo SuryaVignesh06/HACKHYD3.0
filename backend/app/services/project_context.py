@@ -95,7 +95,7 @@ def read_lines(path: Path) -> list[str]:
         return []
 
 
-def search(root: Path, terms: list[str], max_hits: int = 60) -> list[SearchHit]:
+def search(root: Path, terms: list[str], max_hits: int = 400) -> list[SearchHit]:
     hits: list[SearchHit] = []
     if not terms:
         return hits

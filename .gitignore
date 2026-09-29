@@ -27,3 +27,10 @@ Thumbs.db
 
 # local logs
 *.log
+
+# video render intermediates (node video.js)
+video/build/
+video/scene.build.html
+video-still.png
+video-preview.mp4
+problem-preview.mp4

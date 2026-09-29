@@ -1237,6 +1237,68 @@ DEMO_ALERTS: list[dict[str, Any]] = [
             "recent change: CDN origin rule for checkout edited 20 minutes ago"
         ),
     },
+    {
+        "id": "DEMO-D",
+        "title": "notifications-svc crash-looping with OOMKilled after a dependency update",
+        "service": "notifications-svc",
+        "severity": "SEV2",
+        "alert_text": (
+            "[FIRING] KubePodCrashLooping SEV2 notifications-svc\n"
+            "container notifications restarted 12 times in 1h (memory limit 512Mi)\n"
+            "last state: Terminated, Reason: OOMKilled, exit code 137\n"
+            "container_memory_working_set_bytes rising about 9 MiB/min since 07:40, request rate flat\n"
+            "recent change: Renovate PR #2291 \"chore(deps): update node dependencies\" merged and deployed at 07:32"
+        ),
+        "expected": "Matches the notifications-svc memory leak family. Should warn that raising the memory limit failed in INC-019 and INC-028 (and only delayed the crash in INC-009), connect the Renovate dependency update to template-cache slipping past its pin, and recommend pinning template-cache to exactly 2.3.4 with a Renovate ignore rule. The alert never names template-cache; only memory makes that link.",
+        "signals": [
+            {"at_ms": 0, "level": "info", "text": "07:32:10 Renovate PR #2291 merged, deploy notifications-svc 2026.09.29-1"},
+            {"at_ms": 900, "level": "warn", "text": "08:05:40 notifications-svc memory 410Mi of 512Mi, growing 9 MiB/min at flat traffic"},
+            {"at_ms": 1800, "level": "warn", "text": "08:21:03 pod notifications-7c9d4 OOMKilled, exit code 137, restarting"},
+            {"at_ms": 2700, "level": "critical", "text": "08:48:19 email delivery delay p95 6m 40s, SMS queue 18,204 messages"},
+            {"at_ms": 3600, "level": "critical", "text": "09:02:00 KubePodCrashLooping SEV2 firing, paging on-call"},
+        ],
+    },
+    {
+        "id": "DEMO-E",
+        "title": "ledger-worker postings failing with lock timeouts during a deploy migration",
+        "service": "ledger-worker",
+        "severity": "SEV1",
+        "alert_text": (
+            "[FIRING] LedgerPostingErrors SEV1 ledger-worker\n"
+            "ledger posting error rate 29% (threshold 1%) for 5m, settlement postings backing up\n"
+            "log: psycopg.errors.LockNotAvailable: canceling statement due to lock timeout\n"
+            "CONTEXT: while inserting index tuple in relation \"ledger_entries\"\n"
+            "recent deploy: ledger-worker 2026.09.29-2 at 12:40 (migration 0231_add_ledger_entries_currency_idx)"
+        ),
+        "expected": "Matches the Postgres migration lock family on a service that has never had it. Should warn that killing the migration with pg_terminate_backend failed in INC-004 and INC-015 because the Kubernetes Job retried it, and recommend deleting the migration Job first or cancelling from the migration's own session (INC-025), then re-running it off-peak as CREATE INDEX CONCURRENTLY with lock_timeout.",
+        "signals": [
+            {"at_ms": 0, "level": "info", "text": "12:40:05 deploy ledger-worker 2026.09.29-2, migration Job ledger-migrate-0231 started"},
+            {"at_ms": 900, "level": "warn", "text": "12:41:30 ledger_entries: CREATE INDEX holding ShareLock, 212 writers waiting"},
+            {"at_ms": 1800, "level": "warn", "text": "12:42:48 ledger-worker LockNotAvailable 41/s on ledger_entries"},
+            {"at_ms": 2700, "level": "critical", "text": "12:44:10 posting error rate 29%, payments.settled backlog 96,410"},
+            {"at_ms": 3600, "level": "critical", "text": "12:44:12 LedgerPostingErrors SEV1 firing, paging on-call"},
+        ],
+    },
+    {
+        "id": "DEMO-F",
+        "title": "Bank settlement webhooks rejected: certificate expired on hooks.nimbuspay.io",
+        "service": "payments-api",
+        "severity": "SEV1",
+        "alert_text": (
+            "[FIRING] BankWebhookDeliveryFailures SEV1 payments-api\n"
+            "inbound settlement webhooks from Kestrel Bank failing 100% for 10m on https://hooks.nimbuspay.io/v1/bank/settlements\n"
+            "partner error: x509: certificate has expired or is not yet valid: current time 2026-09-29T00:03:18Z is after 2026-09-29T00:00:00Z\n"
+            "blackbox probe https://hooks.nimbuspay.io/healthz failing from 3 regions"
+        ),
+        "expected": "Matches the TLS certificate expiry family on a different host and service. Should cite INC-008 and INC-023, note that a manual certbot renewal only buys another 90 days (partial in INC-023), and recommend issuing the hooks.nimbuspay.io certificate through cert-manager, which worked in INC-023, plus the 14-day expiry alert that was never created.",
+        "signals": [
+            {"at_ms": 0, "level": "info", "text": "05:30:00 hooks.nimbuspay.io certificate notAfter 2026-09-29T00:00:00Z reached"},
+            {"at_ms": 900, "level": "warn", "text": "05:31:12 blackbox probe hooks.nimbuspay.io/healthz: x509 certificate has expired"},
+            {"at_ms": 1800, "level": "warn", "text": "05:33:40 Kestrel Bank webhook retries 3 of 5, settlements unconfirmed 1,284"},
+            {"at_ms": 2700, "level": "critical", "text": "05:39:55 settlement webhook failures 100%, payouts on hold"},
+            {"at_ms": 3600, "level": "critical", "text": "05:40:00 BankWebhookDeliveryFailures SEV1 firing, paging on-call"},
+        ],
+    },
 ]
 
 

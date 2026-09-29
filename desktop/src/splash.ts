@@ -2,7 +2,7 @@ export const SPLASH_HTML = `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>On-Call Copilot</title>
+  <title>FRIDAY</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
@@ -114,7 +114,7 @@ export const SPLASH_HTML = `<!DOCTYPE html>
 <body>
   <div class="card">
     <div class="badge"><span class="dot"></span>Desktop Agent</div>
-    <h1>On-Call Copilot</h1>
+    <h1>FRIDAY</h1>
     <p class="tagline">Starting backend and frontend services...</p>
     <div class="spinner-wrap">
       <div class="spinner-ring"></div>

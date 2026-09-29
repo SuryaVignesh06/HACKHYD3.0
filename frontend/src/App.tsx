@@ -20,6 +20,17 @@ export interface SystemState {
   projects: ProjectOut[];
 }
 
+const PROJECT_KEY = "friday.project";
+
+function readChosenProject(): number | null {
+  try {
+    const value = window.localStorage.getItem(PROJECT_KEY);
+    return value ? Number(value) : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Shown instead of raw errors when the agent's backend cannot be reached. */
 function Offline({ onRetry }: { onRetry: () => void }) {
   return (
@@ -31,7 +42,7 @@ function Offline({ onRetry }: { onRetry: () => void }) {
         <div className="space-y-1.5">
           <h1 className="text-lg font-semibold">The agent is not reachable</h1>
           <p className="text-sm text-muted">
-            On-Call Copilot could not connect to its backend. Nothing was lost; your memory lives in Hindsight.
+            FRIDAY could not connect to its backend. Nothing was lost; your memory lives in Hindsight.
           </p>
           {import.meta.env.DEV && (
             <p className="pt-1 font-mono text-[11px] text-muted">
@@ -56,7 +67,7 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | 
   }
 
   componentDidCatch(error: Error, info: ErrorInfo): void {
-    console.error("On-Call Copilot render error:", error, info.componentStack);
+    console.error("FRIDAY render error:", error, info.componentStack);
   }
 
   render(): ReactNode {
@@ -87,7 +98,19 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | 
 function Shell() {
   const [system, setSystem] = useState<SystemState>({ backend: "checking", backendMessage: null, stats: null, projects: [] });
   const [memoryOn, setMemoryOn] = useState(true);
+  const [chosenProject, setChosenProject] = useState<number | null>(readChosenProject);
   const location = useLocation();
+  // The project FRIDAY inspects: the one chosen in the workspace menu, else the most recently connected.
+  const projectId = system.projects.some((p) => p.id === chosenProject) ? chosenProject : system.projects[system.projects.length - 1]?.id ?? null;
+
+  function chooseProject(id: number) {
+    setChosenProject(id);
+    try {
+      window.localStorage.setItem(PROJECT_KEY, String(id));
+    } catch {
+      // Remembering the choice is a convenience; without storage the latest project is used.
+    }
+  }
 
   const refreshStats = useCallback(() => {
     void Promise.all([api.stats(), api.projects()]).then(([stats, projects]) => {
@@ -109,16 +132,19 @@ function Shell() {
   async function connectProject() {
     if (!desktop) return;
     const result = await desktop.chooseProject();
+    if ("project" in result) chooseProject(result.project.id);
     if ("project" in result || "error" in result) refreshStats();
   }
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full flex-col bg-[#060606]">
       <TopBar
         system={system}
         memoryOn={memoryOn}
         onMemoryChange={setMemoryOn}
         showToggle={location.pathname === "/"}
+        projectId={projectId}
+        onSelectProject={chooseProject}
         onConnectProject={desktop ? () => void connectProject() : null}
       />
       <main className="min-h-0 flex-1">
@@ -127,7 +153,12 @@ function Shell() {
         ) : (
         <ErrorBoundary key={location.pathname}>
         <Routes>
-          <Route path="/" element={<Console memoryOn={memoryOn} refreshStats={refreshStats} projectId={system.projects[system.projects.length - 1]?.id ?? null} />} />
+          <Route path="/" element={<Console
+                memoryOn={memoryOn}
+                refreshStats={refreshStats}
+                project={system.projects.find((p) => p.id === projectId) ?? null}
+                onConnectProject={desktop ? () => void connectProject() : null}
+              />} />
           <Route path="/history" element={<History />} />
           <Route path="/incidents/:id" element={<IncidentDetail />} />
           <Route path="/patterns" element={<Patterns />} />

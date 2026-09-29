@@ -20,10 +20,6 @@ function Field({ label, value, onChange, rows = 3 }: { label: string; value: str
 }
 
 export function ExperienceCard({ experience }: { experience: ExperienceCaptured }) {
-  const delta =
-    experience.memory_count_before !== null && experience.memory_count_after !== null
-      ? experience.memory_count_after - experience.memory_count_before
-      : null;
   return (
     <motion.div
       initial={{ opacity: 0, y: 8 }}
@@ -32,7 +28,7 @@ export function ExperienceCard({ experience }: { experience: ExperienceCaptured 
       className="space-y-4 rounded-lg border border-memory/40 bg-memory/5 p-4"
     >
       <p className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-memory">
-        <BrainCircuit className="h-4 w-4" aria-hidden="true" /> Experience captured
+        <BrainCircuit className="h-4 w-4" aria-hidden="true" /> FRIDAY learned
       </p>
       <div className="space-y-1 text-sm">
         <p className="text-xs text-muted">Pattern</p>
@@ -67,13 +63,8 @@ export function ExperienceCard({ experience }: { experience: ExperienceCaptured 
       <p className="text-xs text-muted">
         {experience.memory_retained ? (
           <>
-            Retained into Hindsight as <span className="font-mono text-ink">{experience.incident_id}</span>
-            {delta !== null && (
-              <>
-                {" "}· memory <span className="font-mono text-ink">{experience.memory_count_before}</span> to{" "}
-                <span className="font-mono text-memory">{experience.memory_count_after}</span> (+{delta})
-              </>
-            )}
+            Saved to Hindsight as <span className="font-mono text-ink">{experience.incident_id}</span>. Your resolution is now available for future
+            incidents.
           </>
         ) : (
           <span className="text-severity">Saved locally, but Hindsight was unavailable, so memory was not updated.</span>

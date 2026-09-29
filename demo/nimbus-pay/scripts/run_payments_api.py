@@ -1,9 +1,11 @@
-"""Simulates payments-api in production for the On-Call Copilot demo.
+"""Simulates payments-api in production for the FRIDAY demo.
 
 Reads the real Helm values file on every tick, so editing deploy/helm/payments-api/values-prod.yaml
 changes the behaviour live. Each worker thread needs about 2.5 Redis connections at peak; when
 REDIS_MAX_POOL is below that, the service logs redis-py "Too many connections" errors and p99 climbs.
-Writes to logs/payments-api.log, which On-Call Copilot reads when the project is authorized.
+Writes to logs/payments-api.log, which FRIDAY reads when the project is authorized. A config change is rolled
+out like a real release: the old pod's output is cleared and a new pod starts, so the terminal (and FRIDAY, reading
+the screen) only shows errors that are still happening.
 
 Usage: python scripts/run_payments_api.py            (runs until Ctrl+C)
        python scripts/run_payments_api.py --once     (one tick, for tests)
@@ -11,6 +13,7 @@ Usage: python scripts/run_payments_api.py            (runs until Ctrl+C)
 
 import argparse
 import math
+import os
 import random
 import re
 import sys
@@ -65,11 +68,22 @@ def main() -> int:
     args = parser.parse_args()
     LOG.parent.mkdir(parents=True, exist_ok=True)
     LOG.write_text("", encoding="utf-8")  # each run starts a fresh log, like a new pod
+    if os.name == "nt":
+        os.system("")  # enables ANSI colours and screen clearing in the Windows console
     env = read_env()
+    rolled_out = (env.get("PAYMENTS_WORKER_CONCURRENCY"), env.get("REDIS_MAX_POOL"))
     print(f"payments-api 2026.09.28-1 starting: workers={env.get('PAYMENTS_WORKER_CONCURRENCY')} "
           f"REDIS_MAX_POOL={env.get('REDIS_MAX_POOL')} (edit {VALUES.relative_to(ROOT)} to change)")
     try:
         while True:
+            current = read_env()
+            release = (current.get("PAYMENTS_WORKER_CONCURRENCY"), current.get("REDIS_MAX_POOL"))
+            if release != rolled_out:
+                rolled_out = release
+                pod = "".join(random.choice("0123456789abcdef") for _ in range(5))
+                sys.stdout.write("\033[2J\033[3J\033[H")  # new pod: the old pod's output is gone
+                print(f"{now()} INFO  rollout: payments-api-{pod} started with workers={release[0]} "
+                      f"REDIS_MAX_POOL={release[1]}")
             lines: list[str] = []
             tick(lines)
             with LOG.open("a", encoding="utf-8") as handle:

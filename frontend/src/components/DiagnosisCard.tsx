@@ -64,7 +64,7 @@ export default function DiagnosisCard({ diagnosis, onOutcome, recorded, compact 
 
   return (
     <div
-      className={`space-y-5 rounded-[20px] border p-5 ${memory ? "border-memory/25 bg-gradient-to-b from-memory/[0.07] to-black/20" : "border-white/[0.07] bg-black/25"}`}
+      className={`space-y-5 rounded-[20px] border bg-bg p-5 ${memory ? "border-memory/25" : "border-white/[0.07]"}`}
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
         <span className={`flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.08em] ${memory ? "text-memory" : "text-muted"}`}>

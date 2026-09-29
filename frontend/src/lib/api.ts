@@ -3,6 +3,7 @@ import type {
   ApiError,
   ApiResult,
   AskAnswer,
+  AssistAnswer,
   AttemptLogged,
   DemoAlert,
   Diagnosis,
@@ -78,6 +79,8 @@ export const api = {
   memoryEvents: (limit = 30) => request<MemoryEvent[]>(`/api/memory/events?limit=${limit}`),
   memoryOverview: () => request<MemoryOverview>("/api/memory/overview"),
   ask: (question: string) => post<AskAnswer>("/api/memory/ask", { question }),
+  assist: (payload: { question: string; screen_text?: string; incident_id?: string; project_id?: number }) =>
+    post<AssistAnswer>("/api/assist", payload),
   seedMemory: () => post<SeedResult>("/api/memory/seed"),
   resetDemo: () => post<{ memories: number; live_incidents_removed: number; log: string[] }>("/api/demo/reset", { confirm: "reset" }),
   readScreen: (imageDataUrl: string) =>

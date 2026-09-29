@@ -15,8 +15,20 @@ from pydantic import BaseModel
 from sqlmodel import Session, select
 
 from app.db import from_db_time, get_session, record_event
-from app.models import AskAnswer, AskRequest, AttemptRow, Diagnosis, DiagnosisRow, IncidentRow, PastIncident
+from app.models import (
+    AskAnswer,
+    AskRequest,
+    AssistAnswer,
+    AssistRequest,
+    AttemptRow,
+    Diagnosis,
+    DiagnosisRow,
+    IncidentRow,
+    PastIncident,
+)
+from app.services import assist as assist_service
 from app.services.evidence import INCIDENT_ID, parse_alert, scrub_unverified_lines
+from app.services.llm import LLMService
 from app.services.memory import MemoryService, MemoryUnavailable
 
 router = APIRouter(prefix="/api")
@@ -99,6 +111,19 @@ def label_for(family: str) -> str:
 def get_memory(request: Request) -> MemoryService:
     memory: MemoryService = request.app.state.memory
     return memory
+
+
+def get_llm(request: Request) -> LLMService:
+    llm: LLMService = request.app.state.llm
+    return llm
+
+
+@router.post("/assist", response_model=AssistAnswer)
+async def assist(body: AssistRequest, session: Session = Depends(get_session), memory: MemoryService = Depends(get_memory),
+                 llm: LLMService = Depends(get_llm)) -> AssistAnswer:
+    """A question about what the engineer is looking at, answered from the screen, Hindsight memory and the
+    authorized project, with every fact labelled by its source (services/assist.py)."""
+    return await assist_service.answer(body, session, memory, llm)
 
 
 @router.post("/memory/ask", response_model=AskAnswer)

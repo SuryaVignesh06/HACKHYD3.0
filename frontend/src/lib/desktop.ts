@@ -17,12 +17,18 @@ export interface IdeContext {
   file: string | null;
 }
 
-export interface ScreenReading {
-  ok: boolean;
+/** One read of the engineer's screen during a "Read my screen" session. */
+export interface WatchReading {
+  seq: number;
+  ok: boolean; // a frame was actually captured and read
   found: boolean;
-  text: string;
+  text: string; // error lines, most important first
+  fingerprint: string | null; // the same error across frames has the same fingerprint
   lineCount: number;
   ms: number;
+  at: string;
+  window: ActiveWindowInfo | null;
+  ide: IdeContext | null;
   message?: string;
 }
 
@@ -52,6 +58,8 @@ export interface CopilotBridge {
   onShortcutUpdated?(callback: (payload: { shortcut: string; registered: boolean }) => void): () => void;
   onActivated(callback: (payload: Activation) => void): () => void;
   hide(): void;
+  /** Resizes the overlay window to the card, so only the card shows over the desktop. */
+  fitOverlay?(height: number): void;
   onDismiss?(callback: () => void): () => void;
   voiceSupported?: boolean;
   voiceStart?(): Promise<{ ok: boolean; message: string }>;
@@ -60,7 +68,11 @@ export interface CopilotBridge {
   openConsole(route: string): void;
   chooseProject(): Promise<ChooseProjectResult>;
   openFile(path: string, line: number): Promise<{ ok: boolean; via: string; message: string }>;
-  readScreen?(): Promise<ScreenReading>;
+  watchStart?(): Promise<{ ok: boolean; message: string }>;
+  watchStop?(): void;
+  onWatch?(callback: (reading: WatchReading) => void): () => void;
+  onWatchEnded?(callback: (payload: { reason: string }) => void): () => void;
+  onFocusComposer?(callback: () => void): () => void;
   authorizeFolder?(folder: string): Promise<ChooseProjectResult>;
 }
 

@@ -1,4 +1,4 @@
-# On-Call Copilot 2.0: desktop engineering memory agent
+# FRIDAY: desktop engineering memory agent
 
 Tagline: **Your engineering team's memory, always one shortcut away.**
 
@@ -13,7 +13,7 @@ This document records the architecture audit and the staged plan for turning the
 | Hindsight | Bank `nimbus-oncall`: mission, disposition, 4 directives, 45 seeded postmortems. Calls used: `retain_batch`, `retain` (alert, fix-attempt, postmortem), `recall`, `reflect` (with a `response_schema` verdict), `list_memories`. |
 | Database | SQLite tables `incidents`, `attempts`, `diagnoses`. History and attempts are imported from `data/` on first start. |
 | Diagnosis | parse, then recall (plus reflect in parallel), evidence, reflect verdict, LLM format, then verification (attempt references, precedent rule, free-text scrub). |
-| Demo | DEMO-A (Redis), DEMO-B (Kafka), DEMO-C (CDN) plus a follow-up on checkout-web. `reset_bank.py`, `learning_check.py`, `stream_diagnosis.py`. |
+| Demo | DEMO-A (Redis), DEMO-B (Kafka), DEMO-C (CDN) plus a follow-up on checkout-web; DEMO-D (OOM after a dependency bump), DEMO-E (migration lock on ledger-worker), DEMO-F (expired webhook certificate). `reset_bank.py`, `learning_check.py`, `stream_diagnosis.py`. |
 
 The INC-042 and INC-051 mismatch mentioned in the upgrade prompt was already fixed in Phase 1: the Redis precedents are INC-030 (12 Aug) and INC-037 (3 Sep), and live incidents start at INC-046.
 

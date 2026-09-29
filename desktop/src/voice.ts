@@ -67,9 +67,9 @@ export function voiceSupported(): boolean {
 export function startVoice(onEvent: (event: VoiceEvent) => void): { ok: boolean; message: string } {
   if (!voiceSupported()) return { ok: false, message: "Voice input uses Windows speech recognition and is only available on Windows." };
   if (proc) return { ok: false, message: "The microphone is already listening." };
-  const scriptPath = join(tmpdir(), "oncall-copilot-voice.ps1");
+  const scriptPath = join(tmpdir(), "friday-voice.ps1");
   writeFileSync(scriptPath, SCRIPT, "utf-8");
-  stopFile = join(tmpdir(), `oncall-copilot-voice-stop-${Date.now()}`);
+  stopFile = join(tmpdir(), `friday-voice-stop-${Date.now()}`);
   const child = spawn(
     "powershell.exe",
     ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", scriptPath, "-StopFile", stopFile, "-MaxSeconds", String(MAX_SECONDS)],

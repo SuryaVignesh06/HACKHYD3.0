@@ -27,19 +27,17 @@
     @apply outline-none ring-2 ring-memory/80 ring-offset-2 ring-offset-bg;
   }
   ::selection {
-    background: rgba(20, 184, 166, 0.35);
+    background: rgba(255, 255, 255, 0.28);
   }
 }
 
 @layer components {
   /*
-   * Fluid glass on a pure black #101010 page, modelled on a clear refractive lens (Apple's liquid glass, React Bits' FluidGlass):
+   * Monochrome glass on a pure black page. Colour is reserved for status feedback.
    * - the body is a lifted, frosted slab, so the card itself pops off the black instead of blending into it;
-   * - ::before holds the caustics: light bent through the glass, white at the top-left, with faint teal and violet
-   *   fringes at the far edge (chromatic aberration). It sits at z-index -1 inside an isolated stacking context, so
+   * - ::before holds a quiet white caustic. It sits at z-index -1 inside an isolated stacking context, so
    *   it paints over the card's background but under its content;
-   * - ::after is the prism rim: a 1px masked gradient, bright white at the corners that catch the light and tinted
-   *   cyan and pink where a real lens splits colour;
+   * - ::after is a crisp 1px white rim;
    * - inset shadows add the bevel (thickness) and the outer shadows lift the card.
    */
   .glass,
@@ -47,16 +45,14 @@
     position: relative;
     border: 0;
     isolation: isolate;
-    background:
-      linear-gradient(160deg, rgba(255, 255, 255, 0.08) 0%, rgba(255, 255, 255, 0.025) 38%, rgba(255, 255, 255, 0.015) 62%, rgba(255, 255, 255, 0.05) 100%),
-      rgba(16, 16, 16, 0.72);
+    background: #101010;
     backdrop-filter: blur(30px) saturate(180%);
     -webkit-backdrop-filter: blur(30px) saturate(180%);
     box-shadow:
       inset 0 1px 0 rgba(255, 255, 255, 0.26),
       inset 0 -1px 0 rgba(255, 255, 255, 0.07),
       inset 2px 3px 8px -4px rgba(255, 255, 255, 0.28),
-      inset -3px -4px 12px -6px rgba(125, 211, 252, 0.22),
+      inset -3px -4px 12px -6px rgba(255, 255, 255, 0.1),
       inset 0 0 28px rgba(255, 255, 255, 0.035),
       0 1px 2px rgba(0, 0, 0, 0.8),
       0 18px 50px rgba(0, 0, 0, 0.9),
@@ -70,16 +66,14 @@
   }
   /* Floating glass (overlay card, drawers, toasts): denser, so text stays crisp over anything. */
   .glass-strong {
-    background:
-      linear-gradient(160deg, rgba(255, 255, 255, 0.1) 0%, rgba(255, 255, 255, 0.03) 36%, rgba(255, 255, 255, 0.015) 64%, rgba(255, 255, 255, 0.05) 100%),
-      rgba(16, 16, 16, 0.88);
+    background: #101010;
     backdrop-filter: blur(44px) saturate(190%);
     -webkit-backdrop-filter: blur(44px) saturate(190%);
     box-shadow:
       inset 0 1px 0 rgba(255, 255, 255, 0.32),
       inset 0 -1px 0 rgba(255, 255, 255, 0.09),
       inset 3px 4px 10px -5px rgba(255, 255, 255, 0.32),
-      inset -4px -5px 16px -8px rgba(125, 211, 252, 0.26),
+      inset -4px -5px 16px -8px rgba(255, 255, 255, 0.12),
       inset 0 0 40px rgba(255, 255, 255, 0.04),
       0 2px 4px rgba(0, 0, 0, 0.8),
       0 40px 110px rgba(0, 0, 0, 0.95),
@@ -94,11 +88,7 @@
     z-index: -1;
     border-radius: inherit;
     pointer-events: none;
-    background:
-      radial-gradient(70% 45% at 12% 0%, rgba(255, 255, 255, 0.16), transparent 70%),
-      radial-gradient(40% 30% at 100% 100%, rgba(45, 212, 191, 0.1), transparent 70%),
-      radial-gradient(35% 28% at 0% 100%, rgba(139, 92, 246, 0.08), transparent 70%),
-      linear-gradient(180deg, rgba(255, 255, 255, 0.06) 0%, transparent 18%);
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.025), transparent 24%);
   }
   /* The prism rim. */
   .glass::after,
@@ -113,10 +103,10 @@
     background: linear-gradient(
       135deg,
       rgba(255, 255, 255, 0.75) 0%,
-      rgba(186, 230, 253, 0.35) 12%,
+      rgba(255, 255, 255, 0.3) 12%,
       rgba(255, 255, 255, 0.06) 34%,
       rgba(255, 255, 255, 0.04) 60%,
-      rgba(244, 114, 182, 0.22) 82%,
+      rgba(255, 255, 255, 0.18) 82%,
       rgba(255, 255, 255, 0.55) 100%
     );
     -webkit-mask:
@@ -126,30 +116,49 @@
     mask-composite: exclude;
   }
   /*
-   * The overlay's hero card: liquid colour drifting slowly through the glass, as light moving behind a lens.
+   * The overlay's hero card: soft white light drifting behind the glass.
    * The card clips it (overflow-hidden); the blobs are blurred and faint so text always reads first.
    */
   .glass-fluid::before {
-    inset: -35%;
-    border-radius: 0;
-    background:
-      radial-gradient(22% 26% at 28% 30%, rgba(45, 212, 191, 0.34), transparent 70%),
-      radial-gradient(24% 22% at 72% 38%, rgba(59, 130, 246, 0.28), transparent 70%),
-      radial-gradient(26% 24% at 50% 72%, rgba(139, 92, 246, 0.26), transparent 70%),
-      radial-gradient(18% 18% at 30% 70%, rgba(236, 72, 153, 0.14), transparent 70%);
-    filter: blur(28px);
-    opacity: 0.55;
-    animation: glass-flow 22s linear infinite;
+    inset: 0;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.025), transparent 30%);
+    opacity: 1;
   }
   .glass-fluid {
-    background:
-      radial-gradient(70% 45% at 12% 0%, rgba(255, 255, 255, 0.12), transparent 70%),
-      linear-gradient(160deg, rgba(255, 255, 255, 0.09) 0%, rgba(255, 255, 255, 0.02) 40%, rgba(255, 255, 255, 0.05) 100%),
-      rgba(16, 16, 16, 0.9);
+    background: #101010;
   }
+  /*
+   * FRIDAY console surfaces: a quiet near-black slab with a hairline border and a faint top highlight,
+   * so the workspace reads as one calm instrument rather than a stack of glowing glass.
+   */
+  .panel {
+    position: relative;
+    border-radius: 16px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.025), rgba(255, 255, 255, 0.008) 40%), #0b0b0b;
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.04),
+      0 20px 50px rgba(0, 0, 0, 0.55);
+  }
+  /* A panel nested in a panel (the three evidence cards inside the incident card). */
+  .panel-inset {
+    border-radius: 14px;
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    background: rgba(255, 255, 255, 0.012);
+  }
+  .panel-button {
+    @apply transition-colors hover:border-white/[0.14] hover:bg-white/[0.025];
+  }
+  /* Code inside a panel: the highlighted line is the one the agent read from disk. */
+  .code-well {
+    border-radius: 10px;
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    background: #070707;
+  }
+
   /* Recessed fields inside glass: inputs, code, logs. */
   .glass-well {
-    background: rgba(16, 16, 16, 0.7);
+    background: #101010;
     border: 1px solid rgba(255, 255, 255, 0.08);
     box-shadow:
       inset 0 1px 3px rgba(0, 0, 0, 0.8),
@@ -157,7 +166,7 @@
   }
   /* Top bar: a thin sheet of glass over black. */
   .glass-bar {
-    background: rgba(16, 16, 16, 0.82);
+    background: #101010;
     border-bottom: 1px solid rgba(255, 255, 255, 0.08);
     box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.03);
     backdrop-filter: blur(28px) saturate(180%);
@@ -173,7 +182,7 @@
   /* Glass inset inside a card: darker than the card, with its own small bevel. */
   .tile {
     @apply rounded-2xl border border-white/[0.08] p-4;
-    background: linear-gradient(160deg, rgba(255, 255, 255, 0.05), rgba(0, 0, 0, 0.35) 45%, rgba(0, 0, 0, 0.45));
+    background: #101010;
     box-shadow:
       inset 0 1px 0 rgba(255, 255, 255, 0.12),
       inset 1px 2px 6px -3px rgba(255, 255, 255, 0.14);
@@ -188,7 +197,7 @@
     @apply rounded-2xl border border-severity/25 bg-severity/[0.06] p-4;
   }
   .tile-amber {
-    @apply rounded-2xl border border-amber-400/25 bg-amber-400/[0.06] p-4;
+    @apply rounded-2xl border border-severity/25 bg-severity/[0.06] p-4;
   }
 
   /* Buttons: pill shaped, tactile, with a gentle press. */
@@ -201,17 +210,17 @@
   .btn-sm {
     @apply px-2.5 py-1 text-xs;
   }
-  /* Tinted liquid glass: the teal shows through a glossy lens with a bright upper rim. */
+  /* Primary action: a clear white control against the black canvas. */
   .btn-primary {
-    @apply text-[#021a17];
+    @apply text-black;
     background:
-      radial-gradient(120% 90% at 50% -30%, rgba(255, 255, 255, 0.55), transparent 55%),
-      linear-gradient(180deg, #34e3cc 0%, #14b8a6 100%);
+      radial-gradient(120% 90% at 50% -30%, rgba(255, 255, 255, 0.7), transparent 55%),
+      linear-gradient(180deg, #ffffff 0%, #d8d8d8 100%);
     box-shadow:
       inset 0 1px 0 rgba(255, 255, 255, 0.6),
       inset 0 -1px 0 rgba(0, 0, 0, 0.15),
       0 1px 2px rgba(0, 0, 0, 0.5),
-      0 8px 24px rgba(20, 184, 166, 0.3);
+      0 8px 24px rgba(255, 255, 255, 0.12);
   }
   .btn-primary:hover {
     filter: brightness(1.07);
@@ -245,7 +254,7 @@
     @apply border border-severity/30 bg-severity/10 text-severity hover:bg-severity/[0.16];
   }
   .btn-amber {
-    @apply border border-amber-400/30 bg-amber-400/10 text-amber-300 hover:bg-amber-400/[0.16];
+    @apply border border-severity/30 bg-severity/10 text-severity hover:bg-severity/[0.16];
   }
 
   /* Segmented control (navigation, mode switches). */
@@ -278,8 +287,8 @@
   }
 
   select option {
-    background-color: #000000;
-    color: #f1f5f9;
+    background-color: #101010;
+    color: #ffffff;
   }
 }
 
@@ -297,15 +306,19 @@
   initial-value: 0deg;
   inherits: false;
 }
+/* Traces the card's own rim while the screen is read, so nothing is drawn outside the card. */
 .screen-glow {
-  position: fixed;
+  position: absolute;
   inset: 0;
+  z-index: 5;
+  border-radius: inherit;
   pointer-events: none;
 }
 /* Each ring is masked to the display edge; the blur sits on the parent so the masked edge stays soft. */
 .screen-glow > span {
   position: absolute;
   inset: 0;
+  border-radius: inherit;
   filter: blur(var(--glow-blur, 0px));
   opacity: var(--glow-opacity, 1);
 }
@@ -314,7 +327,8 @@
   position: absolute;
   inset: 0;
   padding: var(--glow-width, 3px);
-  background: conic-gradient(from var(--glow-angle), #14b8a6, #22d3ee, #3b82f6, #8b5cf6, #ec4899, #f59e0b, #14b8a6);
+  border-radius: inherit;
+  background: conic-gradient(from var(--glow-angle), #ffffff, #777777, #ffffff, #333333, #ffffff);
   -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
   -webkit-mask-composite: xor;
   mask-composite: exclude;
@@ -388,5 +402,23 @@ li:last-child > .step-line {
   *::after {
     animation-duration: 0.01ms !important;
     transition-duration: 0.01ms !important;
+  }
+}
+
+/* Console backdrop: the contour lines breathe very slowly. */
+.wave-backdrop {
+  animation: wave-drift 18s ease-in-out infinite alternate;
+}
+@keyframes wave-drift {
+  from {
+    transform: translateY(0) scaleX(1);
+  }
+  to {
+    transform: translateY(10px) scaleX(1.02);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .wave-backdrop {
+    animation: none;
   }
 }

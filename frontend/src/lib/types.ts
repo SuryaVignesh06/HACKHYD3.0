@@ -358,3 +358,34 @@ export interface AskAnswer {
 }
 
 export type ApiResult<T> = { ok: true; data: T } | { ok: false; error: ApiError };
+
+export type AssistIntent = "cause" | "location" | "history" | "previous_fix" | "why_not" | "exact_change" | "general";
+
+export interface EvidenceItem {
+  source: "SCREEN" | "INCIDENT" | "PROJECT" | "HINDSIGHT";
+  text: string;
+  incident_id: string | null;
+  location: string | null;
+}
+
+/** FRIDAY's grounded answer: the reply plus every fact it rests on, labelled by source. */
+export interface AssistAnswer {
+  question: string;
+  intent: AssistIntent;
+  answer: string;
+  recommendation: string | null;
+  next_step: string | null;
+  current: EvidenceItem[];
+  history: EvidenceItem[];
+  worked: FixRecord[];
+  failed: FixRecord[];
+  findings: CodeFinding[];
+  incidents: PastIncident[];
+  screen_used: boolean;
+  project: string | null;
+  project_error: string | null;
+  memory_unavailable: boolean;
+  no_match: boolean;
+  degraded: boolean;
+  latency_ms: number;
+}

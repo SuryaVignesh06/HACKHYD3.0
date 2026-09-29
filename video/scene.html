@@ -1,0 +1,969 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>FRIDAY video</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+  :root { --ink: #f5f5f5; --muted: #9a9a9a; --green: #35d06f; --red: #ff4d4d; --blue: #93c5fd; --line: rgba(255,255,255,0.09); }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 1920px; height: 1080px; overflow: hidden; background: #050505; }
+  body { font-family: Inter, "Segoe UI", sans-serif; color: var(--ink); -webkit-font-smoothing: antialiased; }
+  .mono { font-family: "JetBrains Mono", Consolas, monospace; }
+  #stage { position: absolute; inset: 0; overflow: hidden; }
+  .abs { position: absolute; }
+  .scene { position: absolute; inset: 0; will-change: opacity; }
+  .center { left: 50%; top: 50%; transform: translate(-50%, -50%); }
+
+  /* surfaces, matching the FRIDAY console */
+  .panel { border-radius: 18px; border: 1px solid rgba(255,255,255,0.09);
+    background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.008) 40%), #0b0b0b;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.05), 0 30px 80px rgba(0,0,0,0.6); }
+  .shot { border-radius: 26px; box-shadow: 0 40px 120px rgba(0,0,0,0.75), 0 0 0 1px rgba(255,255,255,0.06); }
+  .eyebrow { font-size: 15px; font-weight: 600; letter-spacing: 0.22em; text-transform: uppercase; color: var(--muted); }
+  .chip { display: inline-flex; align-items: center; gap: 8px; border-radius: 999px; padding: 6px 14px; font-size: 16px;
+    border: 1px solid rgba(255,255,255,0.12); background: rgba(255,255,255,0.04); white-space: nowrap; }
+  .inc { font-family: "JetBrains Mono", monospace; font-size: 15px; padding: 3px 10px; border-radius: 999px; border: 1px solid rgba(255,255,255,0.18); color: var(--ink); }
+
+  /* captions */
+  #caption { position: absolute; left: 50%; bottom: 44px; transform: translateX(-50%); width: 1500px; text-align: center; }
+  #caption .who { font-size: 13px; font-weight: 600; letter-spacing: 0.3em; color: var(--muted); margin-bottom: 10px; }
+  #caption .who b { color: var(--green); font-weight: 600; }
+  #caption .text { font-size: 32px; font-weight: 500; line-height: 1.35; letter-spacing: -0.01em; }
+  #caption .text span { color: rgba(245,245,245,0.28); }
+  #caption .text span.on { color: var(--ink); }
+  #caption .plate { position: absolute; left: -60px; right: -60px; top: -26px; bottom: -22px; z-index: -1;
+    background: radial-gradient(60% 100% at 50% 60%, rgba(0,0,0,0.78), rgba(0,0,0,0) 100%); }
+  #progress { position: absolute; left: 0; bottom: 0; height: 3px; background: linear-gradient(90deg, rgba(53,208,111,0.2), var(--green)); }
+
+  /* IDE mock (Antigravity / VS Code look) */
+  .ide { border-radius: 16px; overflow: hidden; background: #0d0f12; border: 1px solid rgba(255,255,255,0.1);
+    box-shadow: 0 50px 140px rgba(0,0,0,0.7); display: grid; grid-template-rows: 44px 1fr; }
+  .ide .bar { display: flex; align-items: center; gap: 10px; padding: 0 18px; background: #15181d; border-bottom: 1px solid rgba(255,255,255,0.06);
+    font-size: 15px; color: #aab; }
+  .ide .dot { width: 12px; height: 12px; border-radius: 50%; }
+  .ide .body { display: grid; grid-template-columns: 56px 300px 1fr; min-height: 0; }
+  .ide .act { background: #111418; border-right: 1px solid rgba(255,255,255,0.05); }
+  .ide .act i { display: block; width: 22px; height: 22px; margin: 18px auto; border-radius: 5px; border: 2px solid #4a4f58; }
+  .ide .tree { background: #0f1216; border-right: 1px solid rgba(255,255,255,0.05); padding: 16px 0; font-size: 15px; color: #9aa3ad; }
+  .ide .tree div { padding: 5px 18px; white-space: nowrap; }
+  .ide .tree .sel { background: rgba(147,197,253,0.10); color: #e6edf3; }
+  .ide .main { display: grid; grid-template-rows: 40px 1fr 290px; min-width: 0; min-height: 0; }
+  .ide .tabs { display: flex; background: #111418; border-bottom: 1px solid rgba(255,255,255,0.05); }
+  .ide .tab { padding: 10px 20px; font-size: 14px; color: #e6edf3; background: #0d0f12; border-right: 1px solid rgba(255,255,255,0.05); }
+  .ide .code { position: relative; padding: 14px 0; font-size: 17px; line-height: 27px; overflow: hidden; }
+  .ide .code .ln { display: flex; white-space: pre; position: relative; }
+  .ide .code .no { width: 64px; text-align: right; padding-right: 22px; color: #4d5561; flex: none; }
+  .ide .code .hl { position: absolute; left: 0; right: 0; height: 27px; opacity: 0; background: rgba(255,77,77,0.18); border-left: 3px solid var(--red); }
+  .ide .code .caret { display: inline-block; width: 2px; height: 22px; background: #e6edf3; vertical-align: -4px; }
+  .k { color: #7dd3fc; } .s { color: #fca5a5; } .c { color: #5b6470; } .n { color: #fcd34d; }
+  .ide .term { border-top: 1px solid rgba(255,255,255,0.08); background: #0a0c0f; padding: 10px 22px; font-size: 15px; line-height: 23px; overflow: hidden; }
+  .ide .term .head { font-size: 12px; letter-spacing: 0.14em; color: #6b7280; margin-bottom: 8px; }
+  .ide .term .row { white-space: pre; }
+  .t-err { color: #ff6b6b; } .t-warn { color: #fbbf24; } .t-ok { color: #4ade80; } .t-dim { color: #6b7280; }
+
+  /* screen border while FRIDAY reads the screen */
+  .glow { position: absolute; inset: 0; pointer-events: none; border-radius: 0; }
+  .glow::before { content: ""; position: absolute; inset: 0; box-shadow: inset 0 0 90px 14px rgba(110,185,255,0.25), inset 0 0 22px 3px rgba(160,210,255,0.45); }
+
+  .key { display: inline-flex; align-items: center; justify-content: center; height: 118px; min-width: 118px; padding: 0 38px; border-radius: 24px;
+    font-size: 44px; font-weight: 600; color: var(--ink); background: linear-gradient(180deg, #1f2227, #121418);
+    border: 1px solid rgba(255,255,255,0.14); box-shadow: 0 10px 0 #07080a, 0 24px 50px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.12); }
+
+  .cursor { position: absolute; width: 34px; height: 34px; z-index: 50; filter: drop-shadow(0 4px 8px rgba(0,0,0,0.6)); }
+  .ripple { position: absolute; width: 60px; height: 60px; border-radius: 50%; border: 3px solid rgba(255,255,255,0.8); z-index: 49; }
+
+  /* architecture */
+  .node { position: absolute; transform: translate(-50%, -50%); padding: 22px 26px; min-width: 250px; text-align: left; }
+  .node h4 { font-size: 25px; font-weight: 600; letter-spacing: -0.01em; }
+  .node p { font-size: 16px; color: var(--muted); margin-top: 6px; line-height: 1.4; }
+  .node .ic { width: 42px; height: 42px; border-radius: 12px; margin-bottom: 14px; display: flex; align-items: center; justify-content: center; }
+  .pill { position: absolute; transform: translate(-50%, -50%); }
+  .memrow { display: flex; align-items: center; gap: 12px; font-size: 18px; padding: 10px 14px; border-radius: 12px; background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.07); margin-top: 10px; }
+  .dotc { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+</style>
+</head>
+<body>
+<div id="stage"></div>
+<script>
+"use strict";
+const TL = /*TIMELINE*/null;
+const W = 1920, H = 1080;
+const stage = document.getElementById("stage");
+
+// ------------------------------------------------------------------ helpers
+const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
+const lerp = (a, b, x) => a + (b - a) * x;
+const E = {
+  out: (x) => 1 - Math.pow(1 - clamp(x), 3),
+  inOut: (x) => { x = clamp(x); return x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2; },
+  back: (x) => { x = clamp(x); const c1 = 1.5, c3 = c1 + 1; return 1 + c3 * Math.pow(x - 1, 3) + c1 * Math.pow(x - 1, 2); },
+};
+/** Progress of t through [a, a + d], clamped to 0..1. */
+const P = (t, a, d) => clamp((t - a) / d);
+const L = (id) => TL.lines.find((l) => l.id === id);
+function el(tag, cls, parent, html) {
+  const node = document.createElement(tag);
+  if (cls) node.className = cls;
+  if (html !== undefined) node.innerHTML = html;
+  (parent || stage).appendChild(node);
+  return node;
+}
+function pos(node, x, y, w, h) {
+  node.style.left = `${x}px`; node.style.top = `${y}px`;
+  if (w !== undefined) node.style.width = `${w}px`;
+  if (h !== undefined) node.style.height = `${h}px`;
+  return node;
+}
+function set(node, o = 1, x = 0, y = 0, s = 1, extra = "") {
+  node.style.opacity = o.toFixed(3);
+  node.style.transform = `${extra} translate(${x.toFixed(1)}px, ${y.toFixed(1)}px) scale(${s.toFixed(4)})`;
+  node.style.visibility = o <= 0.001 ? "hidden" : "visible";
+}
+/** In with a rise, out with a fade. */
+function appear(node, t, at, out = Infinity, rise = 24, dur = 0.55) {
+  const i = E.out(P(t, at, dur));
+  const o = 1 - P(t, out, 0.4);
+  set(node, i * o, 0, (1 - i) * rise);
+}
+const svgNS = "http://www.w3.org/2000/svg";
+function svgEl(tag, attrs, parent) {
+  const node = document.createElementNS(svgNS, tag);
+  for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, v);
+  parent.appendChild(node);
+  return node;
+}
+const icon = {
+  check: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>',
+  x: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>',
+  cursor: '<svg viewBox="0 0 24 24" width="34" height="34"><path d="M4 2l16 10-7 2-3 7z" fill="#fff" stroke="#000" stroke-width="1.2" stroke-linejoin="round"/></svg>',
+  mic: '<svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0M12 19v3"/></svg>',
+  db: '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></svg>',
+  code: '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m16 18 6-6-6-6M8 6l-6 6 6 6"/></svg>',
+  folder: '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M3 6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>',
+  spark: '<svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M12 1c.6 5.2 4.8 9.4 10 10-5.2.6-9.4 4.8-10 10-.6-5.2-4.8-9.4-10-10 5.2-.6 9.4-4.8 10-10z"/></svg>',
+  cpu: '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="5" width="14" height="14" rx="2"/><path d="M9 1v4M15 1v4M9 19v4M15 19v4M1 9h4M1 15h4M19 9h4M19 15h4"/></svg>',
+  scan: '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/><circle cx="12" cy="12" r="3"/></svg>',
+};
+
+// ------------------------------------------------------------------ the orb: FRIDAY's wireframe sphere, drawn per frame
+function makeOrb(parent, size) {
+  const canvas = el("canvas", "abs", parent);
+  canvas.width = size; canvas.height = size;
+  const ctx = canvas.getContext("2d");
+  const pts = [];
+  const LAT = 46, LON = 92;
+  for (let i = 0; i < LAT; i++) {
+    const phi = ((i + 0.5) / LAT - 0.5) * Math.PI;
+    for (let j = 0; j < LON; j++) {
+      const th = (j / LON) * Math.PI * 2;
+      pts.push([Math.cos(phi) * Math.cos(th), Math.sin(phi), Math.cos(phi) * Math.sin(th), ((i * 7 + j * 13) % 17) / 17]);
+    }
+  }
+  const buckets = Array.from({ length: 10 }, () => []);
+  return {
+    canvas,
+    draw(t, { color = [255, 255, 255], energy = 1, spin = 0.28 } = {}) {
+      ctx.clearRect(0, 0, size, size);
+      ctx.globalCompositeOperation = "lighter";
+      const R = size * 0.34, cx = size / 2, cy = size / 2;
+      const yaw = t * spin, tilt = 0.36;
+      const cyw = Math.cos(yaw), syw = Math.sin(yaw), ct = Math.cos(tilt), st = Math.sin(tilt);
+      for (const b of buckets) b.length = 0;
+      for (const [nx, ny, nz, rnd] of pts) {
+        const wave = (Math.sin(nx * 5.5 + t * 1.3) * Math.cos(ny * 4.5 + t * 0.55) + 0.5 * Math.sin(nz * 6.5 - t * 0.9)) * 0.075 * energy;
+        const r = 1 + wave;
+        let x = nx * r, y = ny * r, z = nz * r;
+        const x1 = x * cyw + z * syw, z1 = -x * syw + z * cyw;
+        const y2 = y * ct - z1 * st, z2 = y * st + z1 * ct;
+        const rim = Math.pow(1 - Math.abs(z2 / r), 3);
+        const a = Math.max(rim, 0.06) * (0.45 + rnd * 0.55) * (1 - Math.pow(Math.abs(ny), 8) * 0.85);
+        const k = Math.min(9, Math.floor(a * 10));
+        buckets[k].push(cx + x1 * R, cy - y2 * R);
+      }
+      for (let k = 0; k < 10; k++) {
+        const arr = buckets[k];
+        if (!arr.length) continue;
+        ctx.fillStyle = `rgba(${color[0]},${color[1]},${color[2]},${((k + 0.5) / 10).toFixed(2)})`;
+        for (let n = 0; n < arr.length; n += 2) ctx.fillRect(arr[n], arr[n + 1], 1.6, 1.6);
+      }
+    },
+  };
+}
+
+// ------------------------------------------------------------------ background and caption layers
+const bg = el("div", "abs", stage);
+pos(bg, 0, 0, W, H);
+bg.style.background = "radial-gradient(90% 70% at 50% 35%, #0c0c0d 0%, #050505 70%)";
+const contours = document.createElementNS(svgNS, "svg");
+contours.setAttribute("viewBox", "0 0 1920 1080");
+contours.setAttribute("width", "1920"); contours.setAttribute("height", "1080");
+contours.style.position = "absolute"; contours.style.left = "0"; contours.style.top = "0";
+bg.appendChild(contours);
+const contourPaths = [];
+for (let i = 0; i < 18; i++) contourPaths.push(svgEl("path", { fill: "none", stroke: "#fff", "stroke-width": 1 }, contours));
+function drawContours(t) {
+  contourPaths.forEach((p, i) => {
+    const k = i / 17;
+    const lift = 170 - k * 60 + Math.sin(t * 0.25 + i) * 6;
+    const d = `M -120 ${480 + k * 420} C 330 ${400 + k * 230}, 560 ${lift + k * 70}, 960 ${lift + k * 150} S 1590 ${400 + k * 230}, 2040 ${480 + k * 420}`;
+    p.setAttribute("d", d);
+    p.setAttribute("stroke-opacity", (0.018 + (1 - Math.abs(k - 0.35)) * 0.03).toFixed(3));
+  });
+}
+
+const layer = el("div", "abs", stage);
+pos(layer, 0, 0, W, H);
+const caption = el("div", "", stage);
+caption.id = "caption";
+caption.innerHTML = '<div class="plate"></div><div class="who"></div><div class="text"></div>';
+const progress = el("div", "", stage);
+progress.id = "progress";
+let captionLine = null;
+function drawCaption(t) {
+  const line = TL.lines.find((l) => t >= l.start - 0.25 && t <= l.end + 0.45) || null;
+  if (line !== captionLine) {
+    captionLine = line;
+    caption.querySelector(".who").innerHTML = line ? (line.speaker === "workflow" ? "<b>01</b> &nbsp;WORKFLOW" : "<b>02</b> &nbsp;ARCHITECTURE") : "";
+    caption.querySelector(".text").innerHTML = line ? line.text.split(" ").map((w) => `<span>${w}</span>`).join(" ") : "";
+  }
+  if (!line) { caption.style.opacity = "0"; return; }
+  const fade = Math.min(P(t, line.start - 0.25, 0.25), 1 - P(t, line.end + 0.2, 0.25));
+  caption.style.opacity = fade.toFixed(3);
+  // Words light up in step with the voice, weighted by length.
+  const spans = caption.querySelectorAll(".text span");
+  const weights = [...spans].map((s) => s.textContent.length + 2);
+  const total = weights.reduce((a, b) => a + b, 0);
+  const done = P(t, line.start, line.end - line.start) * total;
+  let acc = 0;
+  spans.forEach((s, i) => { acc += weights[i]; s.className = acc - weights[i] * 0.6 <= done ? "on" : ""; });
+}
+
+// ------------------------------------------------------------------ scene framework
+const scenes = [];
+function scene(key, build) {
+  const root = el("div", "scene", layer);
+  scenes.push({ key, root, update: build(root) });
+}
+
+// ------------------------------------------------------------------ shared pieces
+// The demo project's real values file (demo/nimbus-pay/deploy/helm/payments-api/values-prod.yaml), as [comment] or [key, value, kind].
+const YAML = [
+  ["# Helm values for payments-api, production (ap-south-1)."],
+  ["# Rendered by the platform pipeline on every release."],
+  ["replicaCount", "6", "n"],
+  [""],
+  ["image", ""],
+  ["  repository", "483920117734.dkr.ecr.ap-south-1.amazonaws.com/nimbus/payments-api", "s"],
+  ["  tag", "\"2026.09.28-1\"", "s"],
+  [""],
+  ["resources", ""],
+  ["  requests", ""],
+  ["    cpu", "\"1\"", "s"],
+  ["    memory", "1Gi", "n"],
+  ["  limits", ""],
+  ["    memory", "2Gi", "n"],
+  [""],
+  ["env", ""],
+  ["  PAYMENTS_WORKER_CONCURRENCY", "\"24\"", "s"],
+  ["  REDIS_URL", "\"redis://payments-redis.nimbus.internal:6379/0\"", "s"],
+  ["  REDIS_MAX_POOL", "\"20\"", "s"],
+  ["  REDIS_SOCKET_TIMEOUT_MS", "\"250\"", "s"],
+  ["  IDEMPOTENCY_TTL_SECONDS", "\"86400\"", "s"],
+  ["  RATE_LIMIT_WINDOW_SECONDS", "\"60\"", "s"],
+];
+const yamlHtml = ([key, value, kind]) =>
+  value === undefined ? (key ? `<span class="c">${key}</span>` : "&nbsp;") : `<span class="k">${key}</span>:${value ? ` <span class="${kind}">${value}</span>` : ""}`;
+const ERR_LINES = (i) => [
+  ["t-warn", `2026-09-29T18:0${i}:1${i}+05:30 WARN  payments-api POST /v1/charges p99=4.${(i * 3) % 9}s redis_pool=20/20 waiting=${40 + i * 3}`],
+  ["t-err", `2026-09-29T18:0${i}:1${i}+05:30 ERROR payments-api worker-${(i * 7) % 24 + 1} request failed: redis.exceptions.ConnectionError: Too many connections`],
+  ["t-err", '  File "/app/payments/idempotency.py", line 12, in get_idempotency_key'],
+  ["t-err", '    raise ConnectionError("Too many connections")'],
+];
+
+/** An IDE window (Antigravity / VS Code style) with the demo project's values file and a terminal. */
+function makeIDE(parent, x, y, w, h, ideName = "Antigravity") {
+  const ide = pos(el("div", "ide abs", parent), x, y, w, h);
+  ide.innerHTML = `
+    <div class="bar"><span class="dot" style="background:#ff5f57"></span><span class="dot" style="background:#febc2e"></span><span class="dot" style="background:#28c840"></span>
+      <span style="margin-left:18px">values-prod.yaml &mdash; HACKHYD3.0 &mdash; ${ideName}</span></div>
+    <div class="body">
+      <div class="act"><i></i><i></i><i></i><i></i></div>
+      <div class="tree mono">
+        <div style="color:#6b7280;font-size:12px;letter-spacing:.14em">EXPLORER</div>
+        <div>demo / nimbus-pay</div><div>&nbsp;&nbsp;deploy / helm</div><div>&nbsp;&nbsp;&nbsp;&nbsp;payments-api</div>
+        <div class="sel">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;values-prod.yaml</div>
+        <div>&nbsp;&nbsp;services / payments-api</div><div>&nbsp;&nbsp;&nbsp;&nbsp;idempotency.py</div><div>&nbsp;&nbsp;&nbsp;&nbsp;redis_pool.py</div>
+        <div>&nbsp;&nbsp;scripts</div><div>&nbsp;&nbsp;&nbsp;&nbsp;run_payments_api.py</div>
+      </div>
+      <div class="main">
+        <div class="tabs"><div class="tab mono">values-prod.yaml</div><div class="tab mono" style="color:#6b7280;background:none">run_payments_api.py</div></div>
+        <div class="code mono"><div class="lines" style="position:relative"><div class="hl"></div></div></div>
+        <div class="term mono"><div class="head">TERMINAL &nbsp;&nbsp; python scripts/run_payments_api.py</div><div class="rows"></div></div>
+      </div>
+    </div>`;
+  const code = ide.querySelector(".code .lines");
+  const hl = ide.querySelector(".hl");
+  const lines = YAML.map((line, i) => {
+    const row = el("div", "ln", code);
+    row.innerHTML = `<span class="no">${i + 1}</span><span class="txt">${yamlHtml(line)}</span>`;
+    return row;
+  });
+  const rows = ide.querySelector(".rows");
+  let lastRows = "";
+  return {
+    root: ide,
+    /** Highlight a line (1-based) with strength 0..1. */
+    highlight(line, strength) {
+      hl.style.top = `${(line - 1) * 27}px`;
+      hl.style.opacity = strength.toFixed(3);
+    },
+    /** Scrolls the editor by a number of lines (fractions animate smoothly). */
+    scroll(linesUp) {
+      code.style.transform = `translateY(${(-linesUp * 27).toFixed(1)}px)`;
+    },
+    setPool(value, caret) {
+      lines[18].querySelector(".txt").innerHTML = `<span class="k">  REDIS_MAX_POOL</span>: <span class="s">"${value}"</span>${caret ? '<span class="caret"></span>' : ""}`;
+    },
+    terminal(list) {
+      const html = list.map(([cls, text]) => `<div class="row ${cls}">${text.replace(/</g, "&lt;")}</div>`).join("");
+      if (html !== lastRows) { rows.innerHTML = html; lastRows = html; }
+    },
+  };
+}
+
+function termErrors(count) {
+  const out = [["t-dim", "payments-api 2026.09.28-1 starting: workers=24 REDIS_MAX_POOL=20"]];
+  for (let i = 0; i < count; i++) out.push(...ERR_LINES(i + 1));
+  return out.slice(-10);
+}
+
+function makeCursor(parent) {
+  const c = el("div", "cursor", parent, icon.cursor);
+  const r = el("div", "ripple", parent);
+  return {
+    /** Moves along keyframes [[time, x, y]]; a click at time tc draws a ripple. */
+    update(t, keys, clicks = []) {
+      let x = keys[0][1], y = keys[0][2];
+      for (let i = 0; i < keys.length - 1; i++) {
+        const [t0, x0, y0] = keys[i], [t1, x1, y1] = keys[i + 1];
+        if (t >= t0) { const k = E.inOut(P(t, t0, t1 - t0)); x = lerp(x0, x1, k); y = lerp(y0, y1, k); }
+      }
+      const visible = Math.min(P(t, keys[0][0] - 0.3, 0.3), 1 - P(t, keys[keys.length - 1][0] + 0.8, 0.3));
+      const clickAt = clicks.find((tc) => t >= tc && t < tc + 0.6);
+      const press = clicks.some((tc) => t >= tc && t < tc + 0.15) ? 0.85 : 1;
+      set(c, visible, x, y, press);
+      c.style.left = "0px"; c.style.top = "0px";
+      if (clickAt !== undefined) {
+        const k = P(t, clickAt, 0.6);
+        r.style.left = `${x - 13}px`; r.style.top = `${y - 13}px`;
+        set(r, (1 - k) * visible, 0, 0, 0.4 + k * 1.2);
+      } else set(r, 0);
+    },
+  };
+}
+
+function img(parent, src, x, y, w) {
+  const node = el("img", "abs shot", parent);
+  node.src = `assets/${src}`;
+  pos(node, x, y, w);
+  node.style.transformOrigin = "50% 50%";
+  return node;
+}
+
+// ================================================================== SCENES
+
+// ------------------------------------------------------------------ intro: the orb and the name
+scene("intro", (root) => {
+  const orb = makeOrb(root, 520);
+  pos(orb.canvas, W / 2 - 260, 130);
+  const title = pos(el("div", "abs", root, "FRIDAY"), 0, 610, W);
+  title.style.cssText += "text-align:center;font-size:96px;font-weight:300;letter-spacing:0.5em;text-indent:0.5em";
+  const tag = pos(el("div", "abs", root, "Your engineering team's memory, always one shortcut away."), 0, 745, W);
+  tag.style.cssText += "text-align:center;font-size:30px;color:#9a9a9a";
+  const badge = pos(el("div", "abs", root, '<span class="chip">Powered by Hindsight memory</span>'), 0, 815, W);
+  badge.style.textAlign = "center";
+  return (t) => {
+    orb.draw(t, { energy: 0.8 + 0.4 * Math.sin(t) });
+    set(orb.canvas, E.out(P(t, 0, 1.2)), 0, 0, lerp(0.7, 1, E.out(P(t, 0, 1.4))));
+    appear(title, t, 0.7);
+    appear(tag, t, 1.3);
+    appear(badge, t, 1.9);
+  };
+});
+
+// ------------------------------------------------------------------ w1: how FRIDAY works
+scene("w1", (root) => {
+  const orb = makeOrb(root, 300);
+  pos(orb.canvas, 330, 330);
+  const eyebrow = pos(el("div", "abs eyebrow", root, "01 &nbsp;&middot;&nbsp; Workflow"), 700, 390);
+  const title = pos(el("div", "abs", root, "How FRIDAY works"), 700, 430);
+  title.style.cssText += "font-size:92px;font-weight:600;letter-spacing:-0.03em";
+  const sub = pos(el("div", "abs", root, "From an error on your screen to a fix your team already trusts."), 700, 560);
+  sub.style.cssText += "font-size:30px;color:#9a9a9a";
+  const s = L("w1").start;
+  return (t) => {
+    orb.draw(t, { energy: 1 });
+    set(orb.canvas, E.out(P(t, s - 0.4, 0.8)));
+    appear(eyebrow, t, s - 0.3);
+    appear(title, t, s - 0.1, Infinity, 40);
+    appear(sub, t, s + 0.4);
+  };
+});
+
+// ------------------------------------------------------------------ w2: connect FRIDAY to the IDE
+scene("w2", (root) => {
+  const ide = makeIDE(root, 110, 150, 1080, 720);
+  ide.terminal([["t-dim", "$ python scripts/run_payments_api.py"]]);
+  const svg = document.createElementNS(svgNS, "svg");
+  svg.setAttribute("width", W); svg.setAttribute("height", H);
+  svg.style.position = "absolute"; svg.style.left = "0"; svg.style.top = "0";
+  root.appendChild(svg);
+  const ides = ["VS Code", "Antigravity", "Cursor", "JetBrains"];
+  const chips = ides.map((name, i) => pos(el("div", "abs chip", root, `${icon.code}<span>${name}</span>`), 1300, 250 + i * 110));
+  chips.forEach((c) => (c.style.fontSize = "22px"));
+  const hub = pos(el("div", "abs panel", root), 1620, 380, 220, 220);
+  hub.innerHTML = '<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:12px"><div id="w2orb"></div><div style="font-size:22px;letter-spacing:.3em;text-indent:.3em">FRIDAY</div></div>';
+  const orb = makeOrb(hub.querySelector("#w2orb"), 130);
+  orb.canvas.style.position = "static";
+  const links = ides.map((_, i) => svgEl("path", { d: `M 1500 ${272 + i * 110} C 1560 ${272 + i * 110}, 1560 490, 1620 490`, fill: "none", stroke: "#35d06f", "stroke-width": 2, "stroke-dasharray": "6 8" }, svg));
+  const ok = pos(el("div", "abs chip", root, `<span style="color:#35d06f">${icon.check}</span>Connected to your IDE`), 1600, 640);
+  const s = L("w2").start, e = L("w2").end;
+  return (t) => {
+    set(ide.root, E.out(P(t, s - 0.4, 0.7)), (1 - E.out(P(t, s - 0.4, 0.8))) * -40);
+    chips.forEach((c, i) => appear(c, t, s + 0.5 + i * 0.35, Infinity, 16));
+    orb.draw(t, { energy: 1.2 });
+    appear(hub, t, s + 0.3);
+    links.forEach((l, i) => {
+      const k = P(t, s + 1.2 + i * 0.3, 0.6);
+      l.setAttribute("stroke-opacity", k.toFixed(2));
+      l.setAttribute("stroke-dashoffset", (-t * 30).toFixed(1));
+    });
+    appear(ok, t, Math.min(e - 0.6, s + 2.6));
+  };
+});
+
+// ------------------------------------------------------------------ w3: an error, then Ctrl + Space
+scene("w3", (root) => {
+  const ide = makeIDE(root, 160, 90, 1600, 810);
+  const keys = pos(el("div", "abs", root), 0, 400, W);
+  keys.style.cssText += "display:flex;justify-content:center;align-items:center;gap:40px";
+  keys.innerHTML = '<div class="key k1">Ctrl</div><div style="font-size:54px;color:#9a9a9a">+</div><div class="key k2" style="min-width:420px">Space</div>';
+  const k1 = keys.querySelector(".k1"), k2 = keys.querySelector(".k2");
+  const flash = pos(el("div", "abs", root), 0, 0, W, H);
+  flash.style.background = "radial-gradient(50% 50% at 50% 45%, rgba(255,255,255,0.12), transparent 70%)";
+  const s = L("w3").start, e = L("w3").end;
+  const keyAt = s + (e - s) * 0.55;
+  return (t) => {
+    set(ide.root, 1 - 0.45 * E.out(P(t, keyAt - 0.4, 0.4)));
+    ide.highlight(19, 0);
+    const n = Math.floor(clamp((t - s + 0.4) / 0.35, 0, 2.99) + 0.001) + Math.floor(P(t, s, e - s) * 3);
+    ide.terminal(termErrors(Math.max(1, Math.min(4, n))));
+    appear(keys, t, keyAt - 0.35, Infinity, 30, 0.45);
+    const press = (at) => (t >= at && t < at + 0.28 ? 1 : 0);
+    k1.style.transform = `translateY(${press(keyAt + 0.25) * 8}px)`;
+    k1.style.boxShadow = press(keyAt + 0.25) ? "0 2px 0 #07080a, 0 10px 30px rgba(0,0,0,.6)" : "";
+    k2.style.transform = `translateY(${press(keyAt + 0.4) * 8}px)`;
+    k2.style.boxShadow = press(keyAt + 0.4) ? "0 2px 0 #07080a, 0 10px 30px rgba(0,0,0,.6)" : "";
+    set(flash, P(t, keyAt + 0.4, 0.1) * (1 - P(t, keyAt + 0.5, 0.5)));
+  };
+});
+
+// ------------------------------------------------------------------ w4: the popup, voice or text
+scene("w4", (root) => {
+  const ide = makeIDE(root, 160, 90, 1600, 810);
+  ide.terminal(termErrors(4));
+  const dim = pos(el("div", "abs", root), 0, 0, W, H);
+  dim.style.background = "rgba(0,0,0,0.45)";
+  const card = img(root, "ov_home.png", 960 - 300, 170, 600);
+  const voice = pos(el("div", "abs panel", root), 1330, 300, 420, 130);
+  voice.innerHTML = `<div style="display:flex;align-items:center;gap:18px;height:100%;padding:0 26px"><span style="color:#93c5fd">${icon.mic}</span><div class="bars" style="display:flex;gap:6px;align-items:center;height:60px"></div></div>`;
+  const bars = [...Array(18)].map(() => { const b = el("div", "", voice.querySelector(".bars")); b.style.cssText = "width:7px;border-radius:4px;background:#93c5fd"; return b; });
+  const voiceLabel = pos(el("div", "abs eyebrow", root, "Voice"), 1330, 262);
+  const text = pos(el("div", "abs panel mono", root), 170, 560, 470, 90);
+  text.style.cssText += "font-size:24px;display:flex;align-items:center;padding:0 26px";
+  const textLabel = pos(el("div", "abs eyebrow", root, "or text"), 170, 522);
+  const q = "What's wrong here?";
+  const s = L("w4").start, e = L("w4").end;
+  return (t) => {
+    set(dim, E.out(P(t, s - 0.4, 0.5)));
+    const k = E.back(P(t, s - 0.2, 0.55));
+    set(card, clamp(P(t, s - 0.2, 0.3)), 0, (1 - k) * 30, lerp(0.86, 1, k));
+    appear(voice, t, s + 1.2, Infinity, 20);
+    appear(voiceLabel, t, s + 1.2);
+    bars.forEach((b, i) => { b.style.height = `${10 + 46 * Math.abs(Math.sin(t * 7 + i * 0.7) * Math.sin(t * 2.3 + i))}px`; });
+    appear(text, t, s + 2.2, Infinity, 20);
+    appear(textLabel, t, s + 2.2);
+    const typed = Math.floor(P(t, s + 2.5, 1.4) * q.length);
+    text.innerHTML = `${q.slice(0, typed)}<span style="display:inline-block;width:2px;height:28px;background:#f5f5f5;margin-left:3px;opacity:${Math.floor(t * 2) % 2}"></span>`;
+  };
+});
+
+// ------------------------------------------------------------------ w5: it reads the error and recalls similar incidents
+scene("w5", (root) => {
+  const ide = makeIDE(root, 60, 60, 1300, 870);
+  ide.terminal(termErrors(4));
+  const glow = pos(el("div", "glow", root), 0, 0, W, H);
+  const card = img(root, "ov_diagnosis.png", 1400, 250, 460);
+  const panel = pos(el("div", "abs panel", root), 1400, 60, 460, 170);
+  panel.innerHTML = `<div style="padding:20px 24px"><div class="eyebrow" style="color:#93c5fd">Reading your screen</div>
+    <div class="mono" style="font-size:17px;margin-top:10px;color:#ff8080">redis.exceptions.ConnectionError</div>
+    <div class="mono" style="font-size:15px;color:#9a9a9a;margin-top:4px">Too many connections &middot; payments-api</div></div>`;
+  const recall = pos(el("div", "abs", root), 180, 250, 820);
+  recall.innerHTML = `<div class="panel" style="padding:26px 30px">
+      <div style="display:flex;align-items:center;gap:12px"><span style="color:#35d06f">${icon.db}</span><span style="font-size:26px;font-weight:600">Searching Hindsight memory</span></div>
+      <div class="rows" style="margin-top:14px"></div></div>`;
+  const found = [["INC-037", "payments-api p99 4.3 s, Redis Too many connections after Helm release", 0.96, "Sep 3"],
+    ["INC-030", "Redis pool exhausted after concurrency increase", 0.94, "Aug 12"],
+    ["INC-014", "Redis Too many connections again", 0.9, "May 27"]];
+  const rows = found.map(([id, title, rel, date]) => {
+    const r = el("div", "memrow", recall.querySelector(".rows"));
+    r.innerHTML = `<span class="inc">${id}</span><span style="flex:1;font-size:17px">${title}<div style="font-size:14px;color:#9a9a9a;margin-top:3px">${date} &middot; weeks ago</div></span>
+      <span style="width:120px"><div style="height:6px;border-radius:3px;background:rgba(255,255,255,.08)"><div class="fill" style="height:6px;border-radius:3px;background:#35d06f;width:0"></div></div>
+      <div class="mono" style="font-size:14px;text-align:right;margin-top:6px">${Math.round(rel * 100)}%</div></span>`;
+    return { r, fill: r.querySelector(".fill"), rel };
+  });
+  const s = L("w5").start, e = L("w5").end;
+  return (t) => {
+    const g = E.out(P(t, s - 0.4, 0.6));
+    glow.style.opacity = (g * (0.7 + 0.3 * Math.sin(t * 3))).toFixed(3);
+    set(ide.root, 1 - 0.4 * E.out(P(t, s + 0.8, 0.6)));
+    appear(panel, t, s - 0.1, Infinity, 16);
+    const k = E.out(P(t, s + 0.2, 0.7));
+    set(card, k, (1 - k) * 200, 0);
+    appear(recall, t, s + 0.8, Infinity, 30);
+    rows.forEach(({ r, fill, rel }, i) => {
+      appear(r, t, s + 1.5 + i * 0.45, Infinity, 14);
+      fill.style.width = `${(E.out(P(t, s + 1.7 + i * 0.45, 0.8)) * rel * 100).toFixed(1)}%`;
+    });
+  };
+});
+
+// ------------------------------------------------------------------ w6/w7: the real console, the camera moves over it
+const SHOT = { w: 3200, h: 2000 };
+function camera(node, overlays, rect, scaleBoost = 1) {
+  // rect in screenshot pixels [x0, y0, x1, y1]; fit into the frame above the caption.
+  const [x0, y0, x1, y1] = rect;
+  const s = Math.min(1700 / (x1 - x0), 780 / (y1 - y0)) * scaleBoost;
+  const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
+  const tx = W / 2 - cx * s, ty = 470 - cy * s;
+  node.style.transformOrigin = "0 0";
+  node.style.transform = `translate(${tx}px, ${ty}px) scale(${s})`;
+  overlays.style.transformOrigin = "0 0";
+  overlays.style.transform = node.style.transform;
+}
+function lerpRect(a, b, k) { return a.map((v, i) => lerp(v, b[i], k)); }
+function makeConsole(root) {
+  const shot = el("img", "abs", root);
+  shot.src = "assets/console_incident.png";
+  pos(shot, 0, 0, SHOT.w, SHOT.h);
+  shot.style.borderRadius = "0";
+  const over = pos(el("div", "abs", root), 0, 0, SHOT.w, SHOT.h);
+  const box = (x0, y0, x1, y1, color) => {
+    const b = pos(el("div", "abs", over), x0, y0, x1 - x0, y1 - y0);
+    b.style.cssText += `border:5px solid ${color};border-radius:22px;box-shadow:0 0 40px ${color}`;
+    return b;
+  };
+  return { shot, over, box };
+}
+const R = {
+  full: [0, 0, 3200, 2000],
+  card: [380, 480, 2820, 1620],
+  rail: [560, 700, 2740, 960],
+  memory: [420, 980, 1205, 1575],
+  project: [1205, 980, 1995, 1575],
+  answer: [1995, 980, 2780, 1575],
+};
+scene("w6", (root) => {
+  const c = makeConsole(root);
+  const worked = c.box(452, 1086, 1172, 1294, "rgba(53,208,111,0.9)");
+  const failed = c.box(452, 1308, 1172, 1512, "rgba(255,77,77,0.9)");
+  const answer = c.box(2012, 1000, 2764, 1556, "rgba(255,255,255,0.7)");
+  const labels = pos(el("div", "abs", root), 0, 0, W, H);
+  const lw = pos(el("div", "abs chip", labels, `<span style="color:#35d06f">${icon.check}</span>What worked before`), 1330, 330);
+  const lf = pos(el("div", "abs chip", labels, `<span style="color:#ff4d4d">${icon.x}</span>What failed`), 1330, 560);
+  const la = pos(el("div", "abs chip", labels, "The fix that actually worked"), 150, 180);
+  [lw, lf, la].forEach((n) => (n.style.fontSize = "24px"));
+  const s = L("w6").start, e = L("w6").end, d = e - s;
+  return (t) => {
+    const k1 = E.inOut(P(t, s - 0.4, 1.2));
+    const k2 = E.inOut(P(t, s + d * 0.62, 1.0));
+    const rect = t < s + d * 0.62 ? lerpRect(R.card, R.memory, k1) : lerpRect(R.memory, R.answer, k2);
+    camera(c.shot, c.over, rect);
+    set(worked, P(t, s + d * 0.12, 0.4) * (1 - P(t, s + d * 0.62, 0.4)));
+    set(failed, P(t, s + d * 0.35, 0.4) * (1 - P(t, s + d * 0.62, 0.4)));
+    set(answer, P(t, s + d * 0.75, 0.4));
+    appear(lw, t, s + d * 0.12, s + d * 0.6);
+    appear(lf, t, s + d * 0.35, s + d * 0.6);
+    appear(la, t, s + d * 0.78);
+  };
+});
+
+scene("w7", (root) => {
+  const c = makeConsole(root);
+  const line = c.box(1238, 1266, 1966, 1330, "rgba(255,77,77,0.95)");
+  const ideWrap = pos(el("div", "abs", root), 0, 0, W, H);
+  const ide = makeIDE(ideWrap, 160, 90, 1600, 810);
+  ide.terminal(termErrors(4));
+  const tag = pos(el("div", "abs chip mono", root, "deploy/helm/payments-api/values-prod.yaml : 19"), 1010, 150);
+  tag.style.cssText += "font-size:22px;background:rgba(255,77,77,.14);border-color:rgba(255,77,77,.5)";
+  const s = L("w7").start, e = L("w7").end, d = e - s;
+  return (t) => {
+    const k = E.inOut(P(t, s - 0.4, 1.0));
+    camera(c.shot, c.over, lerpRect(R.answer, R.project, k), 1.05);
+    set(line, P(t, s + 0.8, 0.3) * (0.75 + 0.25 * Math.sin(t * 6)));
+    const cut = s + d * 0.55;
+    const ki = E.out(P(t, cut, 0.6));
+    set(ideWrap, ki, 0, (1 - ki) * 40, lerp(0.96, 1, ki));
+    c.shot.style.opacity = (1 - 0.85 * ki).toFixed(3);
+    c.over.style.opacity = c.shot.style.opacity;
+    ide.scroll(9 * E.inOut(P(t, cut + 0.2, 0.7)));
+    ide.highlight(19, E.out(P(t, cut + 0.8, 0.4)));
+    ide.setPool("20", Math.floor(t * 2) % 2 === 0 && t > cut + 0.5);
+    appear(tag, t, cut + 0.7, Infinity, 16);
+  };
+});
+
+// ------------------------------------------------------------------ w8: apply the fix, the error clears, Resolve & Learn
+scene("w8", (root) => {
+  const ide = makeIDE(root, 60, 60, 1300, 870);
+  const glow = pos(el("div", "glow", root), 0, 0, W, H);
+  const gone = img(root, "ov_gone.png", 1400, 250, 460);
+  const resolve = img(root, "ov_resolve.png", 1400, 60, 460);
+  const cursor = makeCursor(root);
+  const s = L("w8").start, e = L("w8").end, d = e - s;
+  const typeAt = s + 0.2, fixed = s + 1.3, goneAt = s + d * 0.45, clickWorked = s + d * 0.62, resolveAt = clickWorked + 0.5, clickResolve = e - 0.35;
+  return (t) => {
+    glow.style.opacity = (0.7 + 0.3 * Math.sin(t * 3)).toFixed(3);
+    ide.scroll(9);
+    ide.highlight(19, 1 - P(t, fixed + 0.8, 0.5));
+    const typed = t < typeAt ? "20" : t < typeAt + 0.35 ? "2" : t < typeAt + 0.6 ? "" : t < typeAt + 0.85 ? "5" : "50";
+    ide.setPool(typed, t < fixed + 0.3);
+    if (t < fixed + 0.6) ide.terminal(termErrors(4));
+    else ide.terminal([
+      ["t-ok", "2026-09-29T18:06:02+05:30 INFO  rollout: payments-api-7f3c2 started with workers=24 REDIS_MAX_POOL=50"],
+      ...[...Array(Math.min(7, Math.floor((t - fixed - 0.6) / 0.45) + 1))].map((_, i) =>
+        ["t-ok", `2026-09-29T18:06:${String(4 + i * 2).padStart(2, "0")}+05:30 INFO  payments-api POST /v1/charges p99=${360 + ((i * 37) % 90)}ms redis_pool=${28 + (i % 5)}/50`]),
+    ]);
+    set(gone, E.out(P(t, goneAt - 0.4, 0.5)) * (1 - P(t, resolveAt - 0.3, 0.25)), (1 - E.out(P(t, goneAt - 0.4, 0.6))) * 120, 0);
+    set(resolve, E.out(P(t, resolveAt, 0.4)), 0, (1 - E.out(P(t, resolveAt, 0.5))) * 30);
+    // Worked sits at the bottom-left of the "gone" card; Resolve and learn at the bottom of the resolve card.
+    cursor.update(t, [[goneAt, 1100, 700], [clickWorked - 0.1, 1462, 897], [resolveAt + 0.2, 1462, 897], [clickResolve - 0.1, 1668, 703]], [clickWorked, clickResolve]);
+  };
+});
+
+// ------------------------------------------------------------------ w9: the experience goes back into memory
+scene("w9", (root) => {
+  const learned = img(root, "ov_learned.png", 230, 110, 470);
+  const vault = pos(el("div", "abs panel", root), 1180, 250, 560, 470);
+  vault.innerHTML = `<div style="padding:28px 30px"><div style="display:flex;align-items:center;gap:12px"><span style="color:#35d06f">${icon.db}</span>
+    <span style="font-size:28px;font-weight:600">Hindsight</span><span style="color:#9a9a9a;font-size:18px;margin-left:auto">engineering memory</span></div><div class="stack" style="margin-top:18px"></div></div>`;
+  const stack = vault.querySelector(".stack");
+  const old = [["INC-037", "Redis pool exhausted after Helm release"], ["INC-030", "Redis pool exhausted after concurrency increase"], ["INC-014", "Redis Too many connections again"]]
+    .map(([id, text]) => { const r = el("div", "memrow", stack); r.innerHTML = `<span class="inc">${id}</span><span style="font-size:17px;color:#cfcfcf">${text}</span>`; return r; });
+  const fresh = pos(el("div", "abs panel", root), 760, 330, 480, 230);
+  fresh.innerHTML = `<div style="padding:20px 24px"><div style="display:flex;gap:10px;align-items:center"><span class="inc" style="border-color:#35d06f;color:#35d06f">INC-099</span>
+    <span style="font-size:18px;font-weight:600">New experience</span></div>
+    <div style="display:flex;gap:10px;margin-top:14px;font-size:17px"><span style="color:#35d06f">${icon.check}</span>Raised REDIS_MAX_POOL from 20 to 50</div>
+    <div style="font-size:15px;color:#9a9a9a;margin-top:10px;line-height:1.4">Lesson: size the Redis pool from worker concurrency.</div></div>`;
+  const saved = pos(el("div", "abs chip", root, `<span style="color:#35d06f">${icon.check}</span>Saved to Hindsight`), 1330, 760);
+  saved.style.fontSize = "22px";
+  const s = L("w9").start, e = L("w9").end;
+  return (t) => {
+    const k = E.out(P(t, s - 0.4, 0.6));
+    set(learned, k, 0, (1 - k) * 30);
+    appear(vault, t, s);
+    old.forEach((r, i) => set(r, 1, 0, E.out(P(t, s + 1.6, 0.5)) * 78));
+    const fly = E.inOut(P(t, s + 0.6, 1.2));
+    set(fresh, P(t, s + 0.3, 0.3), fly * 450, fly * -3, lerp(1, 1.06, fly));
+    vault.style.boxShadow = `0 0 ${(60 * P(t, s + 1.7, 0.3) * (1 - P(t, s + 2.4, 0.8))).toFixed(0)}px rgba(53,208,111,0.5), 0 30px 80px rgba(0,0,0,.6)`;
+    appear(saved, t, Math.min(e - 0.5, s + 2.0));
+  };
+});
+
+// ------------------------------------------------------------------ w10: next time, FRIDAY already knows
+scene("w10", (root) => {
+  const ide = makeIDE(root, 60, 60, 1300, 870);
+  const glow = pos(el("div", "glow", root), 0, 0, W, H);
+  const stamp = pos(el("div", "abs chip mono", root, "Next week &middot; same error, different pod"), 180, 110);
+  stamp.style.fontSize = "20px";
+  const card = img(root, "ov_remember.png", 1400, 120, 460);
+  const big = pos(el("div", "abs", root, "I remember this one."), 180, 380);
+  big.style.cssText += "font-size:84px;font-weight:600;letter-spacing:-0.03em;color:#35d06f;text-shadow:0 0 40px rgba(53,208,111,.35)";
+  const s = L("w10").start, e = L("w10").end;
+  return (t) => {
+    glow.style.opacity = (0.7 + 0.3 * Math.sin(t * 3)).toFixed(3);
+    ide.terminal(termErrors(Math.min(4, 1 + Math.floor(P(t, s - 0.4, 1.2) * 4))).map(([c, x]) => [c, x.replace("18:0", "11:2")]));
+    set(ide.root, 1 - 0.8 * E.out(P(t, s + 1.4, 0.5)));
+    appear(stamp, t, s - 0.2, s + 1.4);
+    const k = E.out(P(t, s + 0.9, 0.7));
+    set(card, k, (1 - k) * 160, 0);
+    appear(big, t, s + 1.7, Infinity, 30);
+  };
+});
+
+// ------------------------------------------------------------------ w11: Fix it once. Remember it forever.
+scene("w11", (root) => {
+  const orb = makeOrb(root, 380);
+  pos(orb.canvas, W / 2 - 190, 90);
+  const a = pos(el("div", "abs", root, "Fix it once."), 0, 470, W);
+  a.style.cssText += "text-align:center;font-size:100px;font-weight:600;letter-spacing:-0.035em";
+  const b = pos(el("div", "abs", root, "Remember it forever."), 0, 600, W);
+  b.style.cssText += "text-align:center;font-size:100px;font-weight:600;letter-spacing:-0.035em;color:#35d06f";
+  const s = L("w11").start, e = L("w11").end;
+  return (t) => {
+    orb.draw(t, { color: [120, 235, 160], energy: 1.2 });
+    set(orb.canvas, E.out(P(t, s - 0.4, 0.8)));
+    appear(a, t, s - 0.1, Infinity, 40);
+    appear(b, t, s + (e - s) * 0.45, Infinity, 40);
+  };
+});
+
+// ------------------------------------------------------------------ a1: behind the scenes
+scene("a1", (root) => {
+  const eyebrow = pos(el("div", "abs eyebrow", root, "02 &nbsp;&middot;&nbsp; Architecture"), 0, 380, W);
+  eyebrow.style.textAlign = "center";
+  const title = pos(el("div", "abs", root, "Behind the scenes"), 0, 420, W);
+  title.style.cssText += "text-align:center;font-size:96px;font-weight:600;letter-spacing:-0.03em";
+  const grid = pos(el("div", "abs", root), 0, 0, W, H);
+  grid.style.backgroundImage = "linear-gradient(rgba(255,255,255,.035) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.035) 1px, transparent 1px)";
+  grid.style.backgroundSize = "60px 60px";
+  const s = L("a1").start;
+  return (t) => {
+    set(grid, E.out(P(t, s - 0.6, 1.2)) * 0.8);
+    appear(eyebrow, t, s - 0.3);
+    appear(title, t, s, Infinity, 40);
+  };
+});
+
+// ------------------------------------------------------------------ a2-a8: the architecture, built line by line
+scene("a2", (root) => {
+  const grid = pos(el("div", "abs", root), 0, 0, W, H);
+  grid.style.backgroundImage = "linear-gradient(rgba(255,255,255,.035) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.035) 1px, transparent 1px)";
+  grid.style.backgroundSize = "60px 60px";
+  grid.style.opacity = "0.8";
+  const svg = document.createElementNS(svgNS, "svg");
+  svg.setAttribute("width", W); svg.setAttribute("height", H);
+  svg.style.position = "absolute"; svg.style.left = "0"; svg.style.top = "0";
+  root.appendChild(svg);
+
+  const N = {
+    ide: [230, 270], project: [230, 620], friday: [640, 445], context: [1010, 445], ai: [1380, 445], hind: [1720, 445], solution: [1380, 770],
+  };
+  const node = (key, ic, color, title, sub, w = 270) => {
+    const a = pos(el("div", "abs", root), N[key][0], N[key][1]);
+    const n = el("div", "node panel", a);
+    n._a = a;
+    n.style.width = `${w}px`;
+    n.innerHTML = `<div class="ic" style="background:${color}22;color:${color}">${ic}</div><h4>${title}</h4><p>${sub}</p>`;
+    return n;
+  };
+  const nIde = node("ide", icon.code, "#93c5fd", "IDE", "VS Code, Antigravity, Cursor", 250);
+  const nProject = node("project", icon.folder, "#93c5fd", "Project", "Code, config, logs (with consent)", 250);
+  const nFriday = node("friday", icon.spark, "#f5f5f5", "FRIDAY", "Desktop app, Ctrl + Space", 250);
+  const nContext = node("context", icon.scan, "#fcd34d", "Context", "", 270);
+  const nAi = node("ai", icon.cpu, "#c4b5fd", "AI layer", "Reasons over evidence", 260);
+  const nHind = node("hind", icon.db, "#35d06f", "Hindsight", "Long-term engineering memory", 300);
+  nHind.style.borderColor = "rgba(53,208,111,0.4)";
+  const ctxChips = ["Current error", "Code", "Project info"].map((label) => { const c = el("div", "chip", nContext.querySelector("p")); c.textContent = label; c.style.cssText += "font-size:14px;padding:4px 10px;margin:6px 6px 0 0;color:#f5f5f5"; return c; });
+  nContext.querySelector("p").style.display = "flex"; nContext.querySelector("p").style.flexWrap = "wrap";
+  const mem = [["#f5f5f5", "Previous incidents"], ["#35d06f", "Successful fixes"], ["#ff4d4d", "Failed attempts"], ["#fcd34d", "Lessons learned"]].map(([c, label]) => {
+    const r = el("div", "memrow", nHind);
+    r.innerHTML = `<span class="dotc" style="background:${c}"></span>${label}`;
+    r.style.fontSize = "17px";
+    return r;
+  });
+  const solAnchor = pos(el("div", "abs", root), N.solution[0], N.solution[1]);
+  const sol = el("div", "node panel", solAnchor);
+  sol._a = solAnchor;
+  sol.style.width = "420px";
+  sol.innerHTML = `<div style="font-size:14px;letter-spacing:.2em;color:#9a9a9a">SOLUTION</div><div style="font-size:21px;font-weight:600;margin-top:8px">Raise REDIS_MAX_POOL 20 &rarr; 50</div>
+    <div class="mono" style="font-size:15px;color:#fca5a5;margin-top:8px">values-prod.yaml : 19</div>`;
+  const confirm = pos(el("div", "abs chip", root, `<span style="color:#35d06f">${icon.check}</span>Worked`), 1640, 770);
+  confirm.style.fontSize = "20px";
+
+  const path = (d, color) => {
+    const p = svgEl("path", { d, fill: "none", stroke: color, "stroke-width": 2.5, "stroke-linecap": "round" }, svg);
+    const len = p.getTotalLength();
+    p.setAttribute("stroke-dasharray", `${len}`);
+    return { p, len, color };
+  };
+  const edges = {
+    ideF: path("M 355 270 C 470 270, 470 445, 515 445", "rgba(147,197,253,0.8)"),
+    projF: path("M 355 620 C 470 620, 470 445, 515 445", "rgba(147,197,253,0.8)"),
+    fCtx: path("M 765 445 L 875 445", "rgba(252,211,77,0.8)"),
+    ctxAi: path("M 1145 445 L 1250 445", "rgba(196,181,253,0.8)"),
+    aiH: path("M 1510 425 L 1570 425", "rgba(53,208,111,0.9)"),
+    hAi: path("M 1570 470 L 1510 470", "rgba(53,208,111,0.9)"),
+    aiSol: path("M 1380 545 L 1380 690", "rgba(245,245,245,0.8)"),
+    solIde: path("M 1170 790 C 700 900, 300 880, 230 700", "rgba(252,165,165,0.8)"),
+    retain: path("M 1590 790 C 1720 790, 1760 720, 1740 640", "rgba(53,208,111,0.9)"),
+  };
+  const pulses = Object.fromEntries(Object.keys(edges).map((k) => {
+    const c = svgEl("circle", { r: 7, fill: edges[k].color }, svg);
+    c.style.filter = "drop-shadow(0 0 8px " + edges[k].color + ")";
+    return [k, c];
+  }));
+  const label = (x, y, text, color) => {
+    const a = pos(el("div", "abs", root), x, y);
+    const l = el("div", "abs mono", a, text);
+    l.style.cssText += `font-size:15px;color:${color};left:0;top:0;white-space:nowrap`;
+    l.style.translate = "-50% -50%";
+    return a;
+  };
+  const lRecall = label(1540, 395, "recall", "#35d06f");
+  const lRetain = label(1790, 715, "retain", "#35d06f");
+  const lPoint = label(640, 880, "points to the code", "#fca5a5");
+
+  const T = (id) => L(id);
+  const draw = (edge, pulse, t, at, dur = 0.8, flow = true) => {
+    const k = E.inOut(P(t, at, dur));
+    edge.p.setAttribute("stroke-dashoffset", (edge.len * (1 - k)).toFixed(1));
+    const c = pulses[pulse];
+    if (k >= 1 && flow) {
+      const f = ((t - at) * 0.45) % 1;
+      const pt = edge.p.getPointAtLength(f * edge.len);
+      c.setAttribute("cx", pt.x); c.setAttribute("cy", pt.y); c.setAttribute("opacity", "1");
+    } else if (k > 0 && k < 1) {
+      const pt = edge.p.getPointAtLength(k * edge.len);
+      c.setAttribute("cx", pt.x); c.setAttribute("cy", pt.y); c.setAttribute("opacity", "1");
+    } else c.setAttribute("opacity", "0");
+  };
+  return (t) => {
+    const a2 = T("a2").start, a3 = T("a3").start, a4 = T("a4").start, a5 = T("a5").start, a6 = T("a6").start, a7 = T("a7").start, a8 = T("a8").start;
+    appear(nFriday._a, t, a2 - 0.2);
+    appear(nIde._a, t, a2 + 0.9);
+    appear(nProject._a, t, a2 + 1.5);
+    draw(edges.ideF, "ideF", t, a2 + 1.3);
+    draw(edges.projF, "projF", t, a2 + 1.9);
+    appear(nContext._a, t, a3 + 0.2);
+    draw(edges.fCtx, "fCtx", t, a3);
+    ctxChips.forEach((c, i) => appear(c, t, a3 + 1.4 + i * 0.6, Infinity, 10));
+    appear(nAi._a, t, a4 + 0.3);
+    draw(edges.ctxAi, "ctxAi", t, a4);
+    appear(nHind._a, t, a4 + 2.0);
+    mem.forEach((r, i) => appear(r, t, a5 + 0.4 + i * 0.75, Infinity, 10));
+    draw(edges.hAi, "hAi", t, a6, 0.6);
+    draw(edges.aiH, "aiH", t, a6 + 0.3, 0.6);
+    appear(lRecall, t, a6 + 0.4);
+    const glowK = P(t, a6, 0.4) * (1 - P(t, a7, 0.6));
+    nAi.style.boxShadow = `0 0 ${(50 * glowK).toFixed(0)}px rgba(196,181,253,0.45), 0 30px 80px rgba(0,0,0,.6)`;
+    appear(sol._a, t, a7 + 0.4);
+    draw(edges.aiSol, "aiSol", t, a7);
+    draw(edges.solIde, "solIde", t, a7 + 1.4, 1.1);
+    appear(lPoint, t, a7 + 2.0);
+    appear(confirm, t, a8 + 0.4);
+    draw(edges.retain, "retain", t, a8 + 1.2, 0.9);
+    appear(lRetain, t, a8 + 1.6);
+    nHind.style.boxShadow = `0 0 ${(70 * P(t, a8 + 2.0, 0.3) * (1 - P(t, a8 + 3.0, 1))).toFixed(0)}px rgba(53,208,111,0.55), 0 30px 80px rgba(0,0,0,.6)`;
+  };
+});
+
+// ------------------------------------------------------------------ a9-a10: the learning loop
+scene("a9", (root) => {
+  const cx = W / 2, cy = 450, r = 300;
+  const svg = document.createElementNS(svgNS, "svg");
+  svg.setAttribute("width", W); svg.setAttribute("height", H);
+  svg.style.position = "absolute"; svg.style.left = "0"; svg.style.top = "0";
+  root.appendChild(svg);
+  const ring = svgEl("circle", { cx, cy, r, fill: "none", stroke: "rgba(255,255,255,0.12)", "stroke-width": 2 }, svg);
+  const arc = svgEl("circle", { cx, cy, r, fill: "none", stroke: "#35d06f", "stroke-width": 4, "stroke-linecap": "round", transform: `rotate(-90 ${cx} ${cy})` }, svg);
+  const circ = 2 * Math.PI * r;
+  arc.setAttribute("stroke-dasharray", `${circ}`);
+  const comet = svgEl("circle", { r: 11, fill: "#35d06f" }, svg);
+  comet.style.filter = "drop-shadow(0 0 14px #35d06f)";
+  const orb = makeOrb(root, 300);
+  pos(orb.canvas, cx - 150, cy - 150);
+  const steps = [["Recall", "Hindsight memory", 0], ["Understand", "Current context", 90], ["Fix", "The engineer acts", 180], ["Retain", "The outcome", 270]].map(([name, sub, deg]) => {
+    const a = ((deg - 90) * Math.PI) / 180;
+    const anchor = pos(el("div", "abs", root), cx + Math.cos(a) * r, cy + Math.sin(a) * r);
+    const n = el("div", "node panel", anchor);
+    n._a = anchor;
+    n.style.minWidth = "0"; n.style.width = "230px"; n.style.textAlign = "center"; n.style.padding = "18px 20px";
+    n.innerHTML = `<h4 style="font-size:30px">${name}</h4><p>${sub}</p>`;
+    return n;
+  });
+  const s = L("a9").start, a10 = L("a10"), d10 = a10.end - a10.start;
+  return (t) => {
+    orb.draw(t, { color: [150, 240, 180], energy: 1.1 });
+    set(orb.canvas, E.out(P(t, s - 0.3, 0.8)));
+    ring.setAttribute("opacity", E.out(P(t, s - 0.3, 0.6)).toFixed(2));
+    const k = E.inOut(P(t, s + 0.3, a10.start - s + d10 * 0.9));
+    arc.setAttribute("stroke-dashoffset", (circ * (1 - k)).toFixed(1));
+    const ang = -Math.PI / 2 + (t > a10.end ? (t - a10.end) * 1.4 + 2 * Math.PI * k : 2 * Math.PI * k);
+    comet.setAttribute("cx", cx + Math.cos(ang) * r); comet.setAttribute("cy", cy + Math.sin(ang) * r);
+    comet.setAttribute("opacity", P(t, s + 0.3, 0.3).toFixed(2));
+    steps.forEach((n, i) => {
+      // Each step lights as the voice reaches its word (the same length weighting as the caption).
+      const at = a10.start + d10 * [0, 8 / 33, 20 / 33, 25 / 33][i] - 0.1;
+      appear(n._a, t, Math.min(at, s + 0.4 + i * 0.25), Infinity, 14);
+      const lit = P(t, at, 0.25) * (1 - P(t, at + d10 / 4 + 0.2, 0.5) * 0.6);
+      n.style.borderColor = `rgba(53,208,111,${(0.15 + 0.75 * lit).toFixed(2)})`;
+      n.style.boxShadow = `0 0 ${(50 * lit).toFixed(0)}px rgba(53,208,111,0.35), 0 30px 80px rgba(0,0,0,.6)`;
+      n.querySelector("h4").style.color = lit > 0.3 ? "#35d06f" : "#f5f5f5";
+    });
+  };
+});
+
+// ------------------------------------------------------------------ a11-a12 and the end card
+scene("a11", (root) => {
+  const a = pos(el("div", "abs", root, "FRIDAY doesn't just answer questions."), 0, 300, W);
+  a.style.cssText += "text-align:center;font-size:66px;font-weight:500;letter-spacing:-0.02em;color:#9a9a9a";
+  const b = pos(el("div", "abs", root, "It builds a memory of how your team engineers."), 0, 400, W);
+  b.style.cssText += "text-align:center;font-size:66px;font-weight:600;letter-spacing:-0.02em";
+  const orb = makeOrb(root, 360);
+  pos(orb.canvas, W / 2 - 180, 150);
+  const name = pos(el("div", "abs", root, "FRIDAY"), 0, 530, W);
+  name.style.cssText += "text-align:center;font-size:92px;font-weight:300;letter-spacing:0.5em;text-indent:0.5em";
+  const tag = pos(el("div", "abs", root, "Fix it once. Remember it forever."), 0, 660, W);
+  tag.style.cssText += "text-align:center;font-size:32px;color:#35d06f";
+  const credit = pos(el("div", "abs", root, '<span class="chip">Built on Hindsight &middot; HackwithHyderabad 3.0</span>'), 0, 740, W);
+  credit.style.textAlign = "center";
+  const s = L("a11").start, s12 = L("a12").start, e12 = L("a12").end;
+  const end = e12 + 0.6;
+  return (t) => {
+    const out = P(t, end, 0.5);
+    appear(a, t, s - 0.1, end);
+    appear(b, t, s12 - 0.1, end);
+    orb.draw(t, { energy: 1 });
+    set(orb.canvas, E.out(P(t, end + 0.2, 0.8)));
+    appear(name, t, end + 0.5);
+    appear(tag, t, end + 1.1);
+    appear(credit, t, end + 1.7);
+    root.style.opacity = (1 - P(t, TL.total - 0.8, 0.8)).toFixed(3);
+    void out;
+  };
+});
+
+// ------------------------------------------------------------------ scene windows and render
+scenes.forEach((sc, i) => {
+  sc.from = sc.key === "intro" ? 0 : L(sc.key).start - 0.45;
+});
+scenes.forEach((sc, i) => { sc.to = i + 1 < scenes.length ? scenes[i + 1].from : TL.total; });
+
+window.render = (t) => {
+  drawContours(t);
+  for (const sc of scenes) {
+    const o = Math.min(P(t, sc.from - 0.25, 0.5), 1 - P(t, sc.to - 0.25, 0.5));
+    if (o <= 0 && !(sc.key === "intro" && t < 0.3)) { sc.root.style.display = "none"; continue; }
+    sc.root.style.display = "block";
+    sc.root.style.opacity = (sc.key === "intro" ? Math.min(1 - P(t, sc.to - 0.25, 0.5), 1) : o).toFixed(3);
+    sc.update(t);
+  }
+  drawCaption(t);
+  progress.style.width = `${((t / TL.total) * 100).toFixed(2)}%`;
+  return true;
+};
+
+// Ready once fonts and every screenshot have loaded (or after a timeout, so an offline render still completes).
+const images = [...document.images].map((im) => (im.complete ? Promise.resolve() : new Promise((r) => { im.onload = r; im.onerror = () => { window.__error = `missing ${im.src}`; r(); }; })));
+Promise.race([Promise.all([document.fonts.ready, ...images]), new Promise((r) => setTimeout(r, 8000))]).then(() => {
+  window.render(0);
+  window.__ready = true;
+});
+</script>
+</body>
+</html>

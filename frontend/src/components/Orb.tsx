@@ -1,8 +1,10 @@
 // The overlay's orb: a WebGL wireframe sphere with a travelling wave and a Fresnel rim.
 // Adapted from "Plasma Ring" by Originkit (supplied by the user), rewritten for framer-motion, a fixed size,
-// a transparent background and live state props (colors, speed, wave and a microphone level).
-import { useEffect, useRef } from "react";
+// a transparent background and live state props (colors, speed, wave, and the engineer's voice: loudness swells the
+// waves, pitch tightens or widens the ripples, and brightness lights up more of the mesh).
+import { useEffect, useRef, type MutableRefObject } from "react";
 import { animate, motionValue } from "framer-motion";
+import type { AudioFeatures } from "../lib/voice";
 
 const DPR_CAP = 1.5;
 const FOV_DEG = 42;
@@ -18,6 +20,7 @@ const HOVER_PUSH = 90;
 const ORBIT_DAMPING = 50;
 const CAM_FAR = 2100;
 const CAM_PER_SCALE = 15;
+const IDLE_SPIN = 0.06; // radians per second at speed 100: a slow, calm drift
 
 const VERT = `
 precision highp float;
@@ -156,8 +159,12 @@ export interface OrbProps {
   /** Wave speed, 100 is calm. */
   speed?: number;
   waveHeight?: number;
+  /** Percentage of the front-facing mesh kept visible. Lower values produce a clear plasma ring. */
+  centerOpacity?: number;
   /** Live 0..1 microphone level; swells the wave while the engineer speaks. */
   level?: number;
+  /** Per-frame voice features (loudness, pitch, brightness); read inside the render loop without re-rendering. */
+  audio?: MutableRefObject<AudioFeatures>;
   /** Mesh density; lower for small orbs. Capped so the index buffer fits 16 bits. */
   density?: number;
   /** Zoom; higher fills more of the canvas. */
@@ -166,13 +173,13 @@ export interface OrbProps {
   className?: string;
 }
 
-export default function Orb({ size, colors, speed = 100, waveHeight = 20, level = 0, density = 110, scale = 78, interactive = true, className = "" }: OrbProps) {
+export default function Orb({ size, colors, speed = 100, waveHeight = 20, centerOpacity = 14, level = 0, audio, density = 72, scale = 78, interactive = true, className = "" }: OrbProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const hoverMV = useRef(motionValue(0)).current;
-  const live = useRef({ colors, speed, waveHeight, level, density: Math.min(density, 120), scale, interactive });
-  live.current = { colors, speed, waveHeight, level, density: Math.min(density, 120), scale, interactive };
-  const smooth = useRef({ speed, wave: waveHeight });
+  const live = useRef({ colors, speed, waveHeight, centerOpacity, level, audio, density: Math.min(density, 120), scale, interactive });
+  live.current = { colors, speed, waveHeight, centerOpacity, level, audio, density: Math.min(density, 120), scale, interactive };
+  const smooth = useRef({ speed, wave: waveHeight, loud: 0, pitch: 0.4, bright: 0 });
 
   useEffect(() => {
     const host = hostRef.current;
@@ -322,9 +329,7 @@ export default function Orb({ size, colors, speed = 100, waveHeight = 20, level 
     const palette = new Float32Array(MAX_COLORS * 3);
     let raf = 0;
     let last = performance.now();
-    let elapsed = 0;
-    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-
+    let phase = 0; // wave phase, integrated so speed changes (including voice-driven ones) never make it jump
     const frame = (now: number) => {
       raf = requestAnimationFrame(frame);
       const dt = Math.min((now - last) / 1000, 0.05);
@@ -332,13 +337,24 @@ export default function Orb({ size, colors, speed = 100, waveHeight = 20, level 
       const L = live.current;
       // Ease speed and wave toward their targets so state changes glide instead of jumping.
       const ease = 1 - Math.pow(0.02, dt);
-      smooth.current.speed += (L.speed - smooth.current.speed) * ease;
-      smooth.current.wave += (L.waveHeight + L.level * 40 - smooth.current.wave) * Math.min(1, ease * 3);
-      elapsed += reduced ? dt * 0.2 : dt;
+      const S = smooth.current;
+      // Voice: a fast attack and a slower release on loudness, so syllables pulse and silences settle gently.
+      const voice = L.audio?.current;
+      const loud = voice?.live ? voice.level : L.level;
+      S.loud += (loud - S.loud) * (loud > S.loud ? 1 - Math.pow(0.0005, dt) : 1 - Math.pow(0.08, dt));
+      if (voice?.live) {
+        S.pitch += (voice.pitch - S.pitch) * (1 - Math.pow(0.03, dt));
+        S.bright += (voice.brightness - S.bright) * (1 - Math.pow(0.02, dt));
+      } else {
+        S.pitch += (0.4 - S.pitch) * ease;
+        S.bright += (0 - S.bright) * ease;
+      }
+      S.speed += (L.speed + S.loud * 45 - S.speed) * ease;
+      S.wave += (L.waveHeight + S.loud * 58 - S.wave) * Math.min(1, ease * 3);
       if (L.density !== built) build(L.density);
 
       const damp = 1 - Math.pow(ORBIT_DAMPING / 100, dt * 10);
-      cam.yaw += cam.yawV * damp + (reduced ? 0 : dt * 0.12 * (smooth.current.speed / 100));
+      cam.yaw += cam.yawV * damp + dt * IDLE_SPIN * (S.speed / 100);
       cam.pitch += cam.pitchV * damp;
       cam.yawV *= 1 - damp * 1.4;
       cam.pitchV *= 1 - damp * 1.4;
@@ -358,16 +374,19 @@ export default function Orb({ size, colors, speed = 100, waveHeight = 20, level 
         active = hoverMV.get() * hov.miss;
       }
 
-      const pal = L.colors.length ? L.colors.slice(0, MAX_COLORS) : ["#14B8A6"];
+      const pal = L.colors.length ? L.colors.slice(0, MAX_COLORS) : ["#F5F5F5"];
       for (let i = 0; i < MAX_COLORS; i++) {
-        const [r, g, b] = parseColor(pal[Math.min(i, pal.length - 1)] ?? "#14B8A6");
+        const [r, g, b] = parseColor(pal[Math.min(i, pal.length - 1)] ?? "#F5F5F5");
         palette[i * 3] = r;
         palette[i * 3 + 1] = g;
         palette[i * 3 + 2] = b;
       }
-      const [tr, tg, tb] = parseColor(pal[0] ?? "#14B8A6");
+      const [tr, tg, tb] = parseColor(pal[0] ?? "#F5F5F5");
       const cy = Math.cos(cam.yaw), sy = Math.sin(cam.yaw), ctp = Math.cos(pitch), stp = Math.sin(pitch);
-      const waveSpeed = (smooth.current.speed / 50) * 120;
+      const waveSpeed = (S.speed / 50) * 120;
+      phase += dt * (waveSpeed / 50) * (waveSpeed / 120);
+      // Higher pitch packs the ripples closer together; a low voice gives long, rolling waves.
+      const waveLength = WAVE_LENGTH * (1.35 - S.pitch * 0.75);
       const angle = (WAVE_DIRECTION * Math.PI) / 180;
 
       gl.clearColor(0, 0, 0, 0);
@@ -375,21 +394,22 @@ export default function Orb({ size, colors, speed = 100, waveHeight = 20, level 
       gl.useProgram(prog);
       gl.uniform2f(u.res, canvas.width, canvas.height);
       gl.uniform1f(u.focal, focal);
-      gl.uniform1f(u.time, elapsed * (waveSpeed / 50));
-      gl.uniform1f(u.radius, RADIUS);
-      gl.uniform1f(u.waveHeight, smooth.current.wave);
-      gl.uniform1f(u.waveLength, WAVE_LENGTH);
-      gl.uniform1f(u.waveSpeed, waveSpeed);
+      gl.uniform1f(u.time, phase);
+      gl.uniform1f(u.radius, RADIUS * (1 + S.loud * 0.05));
+      gl.uniform1f(u.waveHeight, S.wave);
+      gl.uniform1f(u.waveLength, waveLength);
+      gl.uniform1f(u.waveSpeed, 120); // the speed is already folded into the integrated phase
       gl.uniform2f(u.waveDir, Math.sin(angle), Math.cos(angle));
       gl.uniform1f(u.camDist, dist);
       gl.uniform1f(u.camYaw, cam.yaw);
       gl.uniform1f(u.camPitch, cam.pitch);
       gl.uniform1f(u.tilt, (TILT * Math.PI) / 180);
       gl.uniform1f(u.rimPow, RIM_POWER);
-      gl.uniform1f(u.center, 1);
+      gl.uniform1f(u.center, Math.max(0, Math.min(1, (L.centerOpacity + S.bright * 22) / 100)));
       gl.uniform1f(u.colorCount, pal.length);
       gl.uniform3fv(u.colors, palette);
-      gl.uniform3f(u.hotspot, Math.min(1, tr * 0.6 + 0.8), Math.min(1, tg * 0.4 + 0.7), Math.min(1, tb * 0.5 + 0.8));
+      // Preserve the supplied palette exactly; the original hotspot math introduced an unwanted colour cast.
+      gl.uniform3f(u.hotspot, tr, tg, tb);
       gl.uniform3f(u.camDir, -sy * ctp, stp, cy * ctp);
       gl.uniform3f(u.hoverDir, hov.dir[0], hov.dir[1], hov.dir[2]);
       gl.uniform1f(u.hoverRadius, HOVER_RADIUS);
@@ -423,7 +443,7 @@ export default function Orb({ size, colors, speed = 100, waveHeight = 20, level 
     };
   }, [hoverMV]);
 
-  const first = colors[0] ?? "#14B8A6";
+  const first = colors[0] ?? "#F5F5F5";
   const lastColor = colors[colors.length - 1] ?? first;
   return (
     <div
@@ -441,12 +461,13 @@ export default function Orb({ size, colors, speed = 100, waveHeight = 20, level 
   );
 }
 
-/** Orb palettes per agent state. Teal is the memory accent (CLAUDE.md section 9). */
+/** Monochrome for neutral activity, green for success, and red for warnings. */
+/** Speeds are deliberately low: the orb breathes rather than spins, and the voice supplies the energy. */
 export const ORB = {
-  idle: { colors: ["#14B8A6", "#3B82F6", "#8B5CF6"], speed: 90, waveHeight: 9 },
-  listening: { colors: ["#2DD4BF", "#22D3EE", "#A78BFA"], speed: 140, waveHeight: 14 },
-  thinking: { colors: ["#2DD4BF", "#14B8A6", "#6366F1"], speed: 260, waveHeight: 20 },
-  success: { colors: ["#22C55E", "#14B8A6", "#3B82F6"], speed: 110, waveHeight: 8 },
-  warning: { colors: ["#F59E0B", "#EF4444", "#8B5CF6"], speed: 120, waveHeight: 10 },
-  off: { colors: ["#9A9A9A", "#6B7280", "#A3A3A3"], speed: 70, waveHeight: 7 },
+  idle: { colors: ["#FFFFFF", "#101010", "#FFFFFF"], speed: 55, waveHeight: 22 },
+  listening: { colors: ["#FFFFFF", "#101010", "#FFFFFF"], speed: 70, waveHeight: 18 },
+  thinking: { colors: ["#FFFFFF", "#101010", "#FFFFFF"], speed: 110, waveHeight: 36 },
+  success: { colors: ["#35D06F", "#101010", "#FFFFFF"], speed: 60, waveHeight: 20 },
+  warning: { colors: ["#FF4D4D", "#101010", "#FFFFFF"], speed: 70, waveHeight: 26 },
+  off: { colors: ["#FFFFFF", "#101010", "#FFFFFF"], speed: 35, waveHeight: 12 },
 } as const;

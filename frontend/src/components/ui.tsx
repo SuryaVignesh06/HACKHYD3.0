@@ -68,7 +68,7 @@ export function Switch({ on, onChange, label, disabled = false }: { on: boolean;
       aria-label={label}
       disabled={disabled}
       onClick={() => onChange(!on)}
-      className={`relative inline-flex h-[22px] w-[38px] shrink-0 items-center rounded-full transition-colors duration-200 disabled:opacity-40 ${on ? "bg-memory" : "bg-white/15"}`}
+      className={`relative inline-flex h-[22px] w-[38px] shrink-0 items-center rounded-full transition-colors duration-200 disabled:opacity-40 ${on ? "bg-success" : "bg-white/15"}`}
     >
       <span
         className={`absolute left-[2px] h-[18px] w-[18px] rounded-full bg-white shadow-[0_1px_3px_rgba(0,0,0,0.4)] transition-transform duration-200 ${on ? "translate-x-4" : "translate-x-0"}`}

@@ -1,51 +1,62 @@
+// FRIDAY console: the orb, one incident workspace (stages, team memory, your code, likely root cause, what to do
+// next) and a single composer. The investigation streams in live; every card fills from real step events.
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Activity, BrainCircuit, CheckCheck, ClipboardList, ListTree, RotateCcw, Siren } from "lucide-react";
+import { AnimatePresence, motion } from "framer-motion";
+import { Brain, ClipboardList, ExternalLink, GitCompareArrows, ListTree, MessageSquareText, Plus, TrendingUp, X } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import ActionLog from "../components/ActionLog";
-import AlertInput, { demoChoices, type AlertDraft, type DemoChoice } from "../components/AlertInput";
-import { ConsoleHero, MemorySnapshot } from "../components/ConsoleHome";
-import DiagnosisCard, { ModeLine } from "../components/DiagnosisCard";
-import ResultView from "../components/ResultView";
-import { FixHistory, Lifecycle } from "../components/DiagnosisSections";
-import { IncidentChip } from "../components/IncidentPeek";
+import AssistAnswerView from "../components/AssistAnswerView";
+import Composer, { type ComposerHandle } from "../components/Composer";
+import { FridayHero, IdleWorkspace, SignalFeed, demoChoices, type DemoChoice } from "../components/ConsoleHome";
+import DiagnosisCard from "../components/DiagnosisCard";
 import InvestigationTimeline from "../components/InvestigationTimeline";
 import LearningCurve from "../components/LearningCurve";
 import MemoryPanel from "../components/MemoryPanel";
+import { ORB } from "../components/Orb";
 import ResolveDrawer, { ExperienceCard } from "../components/ResolveDrawer";
+import ResultView from "../components/ResultView";
+import Sheet from "../components/Sheet";
 import Toast from "../components/Toast";
-import { ConfidenceBar, Panel, SeverityBadge } from "../components/ui";
-import { LinkedText } from "../components/IncidentPeek";
+import { FOCUS_COMPOSER_EVENT } from "../components/TopBar";
+import WaveBackdrop from "../components/WaveBackdrop";
+import {
+  CodeCard,
+  IncidentHeader,
+  NextStepsCard,
+  RootCauseCard,
+  StageRail,
+  TeamMemoryCard,
+  type MenuItem,
+  type WorkspaceRun,
+} from "../components/Workspace";
 import { api, streamDiagnosis } from "../lib/api";
+import { looksLikeError } from "../lib/desktop";
+import { useVoice } from "../lib/voice";
 import type {
+  AssistAnswer,
   AttemptLogged,
+  CodeFinding,
   Diagnosis,
+  DemoSignal,
   EvidenceStepData,
   ExperienceCaptured,
-  FixRecord,
   IncidentCreated,
-  InvestigationStep,
   LearningPoint,
   MatchedIncident,
-  MemoryOverview,
   Outcome,
+  ProjectOut,
   RecallStepData,
   RecalledMemory,
   StreamEvent,
 } from "../lib/types";
 
-interface RunState {
-  memory: boolean;
-  steps: InvestigationStep[];
+interface RunState extends WorkspaceRun {
   matched: MatchedIncident[];
   recalled: RecalledMemory[];
-  diagnosis: Diagnosis | null;
-  error: string | null;
-  running: boolean;
-  startedAt: number;
-  fix: { worked: FixRecord[]; failed: FixRecord[] } | null;
-  unavailable: boolean;
 }
 
 type RunKey = "on" | "off";
+type SheetKind = "evidence" | "log" | "timeline" | null;
 const keyOf = (memory: boolean): RunKey => (memory ? "on" : "off");
 
 function isRecallData(data: Record<string, unknown>): data is Record<string, unknown> & RecallStepData {
@@ -56,6 +67,11 @@ function isEvidenceData(data: Record<string, unknown>): data is Record<string, u
   return Array.isArray(data.worked_fixes) && Array.isArray(data.failed_fixes);
 }
 
+function findingsOf(data: Record<string, unknown>): CodeFinding[] | null {
+  return Array.isArray(data.findings) ? (data.findings as CodeFinding[]) : null;
+}
+
+/** Memory impact, computed only from the two real answers for the same incident. */
 function ImpactRow({ off, on }: { off: Diagnosis; on: Diagnosis }) {
   const rows: [string, string, string][] = [
     ["Past incidents cited", String(off.cited_incidents.length), String(on.cited_incidents.length)],
@@ -64,96 +80,61 @@ function ImpactRow({ off, on }: { off: Diagnosis; on: Diagnosis }) {
     ["Confidence", off.confidence === null ? "n/a" : `${Math.round(off.confidence * 100)}%`, on.confidence === null ? "n/a" : `${Math.round(on.confidence * 100)}%`],
   ];
   return (
-    <div className="tile !p-0">
-      <table className="w-full text-xs">
-        <thead>
-          <tr className="text-left text-muted">
-            <th className="px-4 pb-2 pt-3 font-medium">Memory impact, computed from the two answers</th>
-            <th className="px-4 pb-2 pt-3 font-medium">Without</th>
-            <th className="px-4 pb-2 pt-3 font-medium text-memory">With</th>
+    <table className="w-full text-xs">
+      <thead>
+        <tr className="text-left text-muted">
+          <th className="pb-2 font-medium">Computed from the two answers</th>
+          <th className="pb-2 font-medium">Without memory</th>
+          <th className="pb-2 font-medium text-ink">With memory</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map(([label, a, b]) => (
+          <tr key={label} className="border-t border-white/[0.06]">
+            <td className="py-2 text-muted">{label}</td>
+            <td className="py-2 font-mono text-muted">{a}</td>
+            <td className="py-2 font-mono text-ink">{b}</td>
           </tr>
-        </thead>
-        <tbody>
-          {rows.map(([label, a, b]) => (
-            <tr key={label} className="border-t border-white/[0.06]">
-              <td className="px-4 py-2 text-muted">{label}</td>
-              <td className="px-4 py-2 font-mono text-muted">{a}</td>
-              <td className="px-4 py-2 font-mono text-ink">{b}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+        ))}
+      </tbody>
+    </table>
   );
 }
 
-/** Short answer on top, details in tabs, one question at the bottom. */
-function ConsoleDiagnosis({ diagnosis, recorded, onOutcome }: {
-  diagnosis: Diagnosis;
-  recorded: Outcome | null;
-  onOutcome?: (action: string, outcome: Outcome) => void;
-}) {
-  if (diagnosis.degraded) return <DiagnosisCard diagnosis={diagnosis} />;
-  const learned = diagnosis.matched.some((m) => m.learned_live && diagnosis.cited_incidents.includes(m.id));
-  const headline = !diagnosis.memory_enabled
-    ? diagnosis.memory_unavailable
-      ? "Memory unavailable"
-      : "Answer without memory"
-    : learned
-      ? "I remember this one."
-      : diagnosis.strong_match
-        ? "I've seen this before."
-        : "Nothing quite like this yet.";
-  const tone = !diagnosis.memory_enabled ? (diagnosis.memory_unavailable ? "text-amber-300" : "text-muted") : diagnosis.strong_match ? "text-memory" : "text-amber-300";
-  const fix = diagnosis.try_first;
+function AnswerPanel({ answer, onClose }: { answer: AssistAnswer; onClose: () => void }) {
   return (
-    <div className="space-y-4">
-      <div className="space-y-2">
-        <p className={`text-xl font-semibold tracking-tight ${tone}`}>{headline}</p>
-        <p className="text-sm leading-6 text-ink">
-          <LinkedText text={diagnosis.summary} />
-        </p>
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-          <ModeLine diagnosis={diagnosis} />
-          <span className="flex items-center gap-2 text-xs text-muted">
-            Confidence <ConfidenceBar value={diagnosis.confidence} tone={diagnosis.memory_enabled ? "memory" : "muted"} />
-          </span>
+    <motion.section initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} className="panel p-5">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h2 className="flex items-center gap-2 text-[15px] font-medium text-ink">
+            <MessageSquareText className="h-4 w-4" aria-hidden="true" />
+            {answer.memory_unavailable ? "FRIDAY memory is unavailable" : answer.no_match ? "FRIDAY" : "FRIDAY found related experience"}
+          </h2>
+          <p className="mt-0.5 truncate text-xs text-muted">{answer.question}</p>
         </div>
+        <button type="button" onClick={onClose} aria-label="Dismiss answer" className="btn btn-ghost !p-1.5">
+          <X className="h-4 w-4" aria-hidden="true" />
+        </button>
       </div>
-      <ResultView diagnosis={diagnosis} />
-      {onOutcome && fix && (
-        <div className="flex flex-wrap items-center gap-2 border-t border-white/[0.06] pt-4">
-          {recorded ? (
-            <span className={`text-xs ${recorded === "worked" ? "text-success" : recorded === "partial" ? "text-amber-300" : "text-severity"}`}>
-              Recorded: the first fix {recorded === "worked" ? "worked" : recorded === "partial" ? "partly worked" : "did not work"}. It was sent to memory.
-            </span>
-          ) : (
-            <>
-              <span className="mr-1 text-xs text-muted">Did the first fix work?</span>
-              <button type="button" onClick={() => onOutcome(fix.action, "worked")} className="btn btn-success btn-sm">
-                Worked
-              </button>
-              <button type="button" onClick={() => onOutcome(fix.action, "partial")} className="btn btn-amber btn-sm">
-                Partly
-              </button>
-              <button type="button" onClick={() => onOutcome(fix.action, "failed")} className="btn btn-danger btn-sm">
-                Didn't work
-              </button>
-            </>
-          )}
-        </div>
-      )}
-    </div>
+      <div className="mt-3">
+        <AssistAnswerView answer={answer} />
+      </div>
+    </motion.section>
   );
 }
 
-export default function Console({ memoryOn, refreshStats, projectId }: { memoryOn: boolean; refreshStats: () => void; projectId: number | null }) {
+export default function Console({ memoryOn, refreshStats, project, onConnectProject }: {
+  memoryOn: boolean;
+  refreshStats: () => void;
+  project: ProjectOut | null;
+  onConnectProject: (() => void) | null;
+}) {
+  const navigate = useNavigate();
   const [demos, setDemos] = useState<DemoChoice[]>([]);
-  const [overview, setOverview] = useState<MemoryOverview | null>(null);
-  const [simulateRequest, setSimulateRequest] = useState<{ choice: DemoChoice; nonce: number } | null>(null);
-  const [draft, setDraft] = useState<AlertDraft>({ alertText: "", service: "payments-api", severity: "SEV1" });
+  const [composer, setComposer] = useState("");
   const [incident, setIncident] = useState<IncidentCreated | null>(null);
   const [createError, setCreateError] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
   const [runs, setRuns] = useState<Partial<Record<RunKey, RunState>>>({});
   const [attempts, setAttempts] = useState<AttemptLogged[]>([]);
   const [recorded, setRecorded] = useState<Record<string, Outcome>>({});
@@ -162,8 +143,18 @@ export default function Console({ memoryOn, refreshStats, projectId }: { memoryO
   const [experience, setExperience] = useState<ExperienceCaptured | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [logError, setLogError] = useState<string | null>(null);
+  const [sheet, setSheet] = useState<SheetKind>(null);
+  const [answer, setAnswer] = useState<AssistAnswer | null>(null);
+  const [asking, setAsking] = useState(false);
+  const [askError, setAskError] = useState<string | null>(null);
+  const [sim, setSim] = useState<{ demo: DemoChoice; signals: DemoSignal[] } | null>(null);
   const aborts = useRef<AbortController[]>([]);
+  const simTimers = useRef<number[]>([]);
+  const composerRef = useRef<ComposerHandle>(null);
   const clearToast = useCallback(() => setToast(null), []);
+  const closeSheet = useCallback(() => setSheet(null), []);
+
+  const voice = useVoice((text) => setComposer((c) => (c.trim() ? `${c.trim()} ${text}` : text)));
 
   const refreshLearning = useCallback(() => {
     void api.learning().then((r) => r.ok && setLearning(r.data));
@@ -171,10 +162,32 @@ export default function Console({ memoryOn, refreshStats, projectId }: { memoryO
 
   useEffect(() => {
     void api.demoAlerts().then((r) => r.ok && setDemos(demoChoices(r.data)));
-    void api.memoryOverview().then((r) => r.ok && setOverview(r.data));
     refreshLearning();
-    return () => aborts.current.forEach((a) => a.abort());
+    const timers = simTimers.current;
+    return () => {
+      aborts.current.forEach((a) => a.abort());
+      timers.forEach((t) => window.clearTimeout(t));
+    };
   }, [refreshLearning]);
+
+  useEffect(() => {
+    const focus = () => composerRef.current?.focus();
+    // "/" jumps to the composer, as in most consoles, unless the engineer is already typing somewhere.
+    const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      const typing = target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT" || target.isContentEditable);
+      if (e.key === "/" && !typing && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        e.preventDefault();
+        focus();
+      }
+    };
+    window.addEventListener(FOCUS_COMPOSER_EVENT, focus);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener(FOCUS_COMPOSER_EVENT, focus);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, []);
 
   const running = Boolean(runs.on?.running || runs.off?.running);
 
@@ -190,7 +203,10 @@ export default function Console({ memoryOn, refreshStats, projectId }: { memoryO
         });
       setRuns((prev) => ({
         ...prev,
-        [key]: { memory, steps: [], matched: [], recalled: [], diagnosis: null, error: null, running: true, startedAt: Date.now(), fix: null, unavailable: false },
+        [key]: {
+          memory, steps: [], matched: [], recalled: [], matchedCount: 0, findings: [], diagnosis: null, error: null,
+          running: true, startedAt: Date.now(), fix: null, unavailable: false,
+        },
       }));
       await streamDiagnosis(
         incidentId,
@@ -198,14 +214,18 @@ export default function Console({ memoryOn, refreshStats, projectId }: { memoryO
         (event: StreamEvent) => {
           if (event.type === "step") {
             const data = event.data;
+            const findings = event.step.name === "inspect" ? findingsOf(data) : null;
             update((r) => ({
               ...r,
               steps: [...r.steps, event.step],
-              ...(event.step.name === "recall" && isRecallData(data) ? { matched: data.matched, recalled: data.recalled, unavailable: data.unavailable === true } : {}),
+              ...(event.step.name === "recall" && isRecallData(data)
+                ? { matched: data.matched, recalled: data.recalled, matchedCount: data.matched.length, unavailable: data.unavailable === true }
+                : {}),
               ...(event.step.name === "evidence" && isEvidenceData(data) ? { fix: { worked: data.worked_fixes, failed: data.failed_fixes } } : {}),
+              ...(findings ? { findings } : {}),
             }));
           } else if (event.type === "diagnosis") {
-            update((r) => ({ ...r, diagnosis: event.diagnosis, running: false }));
+            update((r) => ({ ...r, diagnosis: event.diagnosis, findings: event.diagnosis.findings, running: false }));
           } else {
             update((r) => ({ ...r, error: event.message, running: false }));
           }
@@ -224,37 +244,7 @@ export default function Console({ memoryOn, refreshStats, projectId }: { memoryO
     if (!runs[keyOf(memoryOn)] && (runs.on || runs.off)) void run(incident.id, memoryOn);
   }, [memoryOn]); // only the toggle should trigger a comparison run
 
-  async function submit(next: AlertDraft) {
-    setCreateError(null);
-    const same =
-      incident && incident.status === "open" && incident.alert_text === next.alertText && incident.service === next.service;
-    if (same) {
-      void run(incident.id, memoryOn);
-      return;
-    }
-    const created = await api.createIncident({
-      alert_text: next.alertText,
-      service: next.service,
-      severity: next.severity,
-      origin: "manual",
-      ...(projectId !== null ? { project_id: projectId } : {}),
-    });
-    if (!created.ok) {
-      setCreateError(created.error.message);
-      return;
-    }
-    aborts.current.forEach((a) => a.abort());
-    aborts.current = [];
-    setIncident(created.data);
-    setRuns({});
-    setAttempts([]);
-    setRecorded({});
-    setExperience(null);
-    setLogError(null);
-    void run(created.data.id, memoryOn);
-  }
-
-  function newIncident() {
+  function reset() {
     aborts.current.forEach((a) => a.abort());
     aborts.current = [];
     setIncident(null);
@@ -262,7 +252,78 @@ export default function Console({ memoryOn, refreshStats, projectId }: { memoryO
     setAttempts([]);
     setRecorded({});
     setExperience(null);
-    setDraft({ alertText: "", service: draft.service, severity: draft.severity });
+    setLogError(null);
+    setCreateError(null);
+    setSheet(null);
+  }
+
+  function stopSimulation() {
+    simTimers.current.forEach((t) => window.clearTimeout(t));
+    simTimers.current = [];
+    setSim(null);
+  }
+
+  async function investigate(alertText: string, meta?: { service: string; severity: string }) {
+    setCreateError(null);
+    setAnswer(null);
+    setCreating(true);
+    const created = await api.createIncident({
+      alert_text: alertText,
+      ...(meta ? { service: meta.service, severity: meta.severity } : {}),
+      origin: meta ? "demo" : "manual",
+      ...(project ? { project_id: project.id } : {}),
+    });
+    setCreating(false);
+    if (!created.ok) {
+      setCreateError(created.error.message);
+      return;
+    }
+    reset();
+    setIncident(created.data);
+    setComposer("");
+    void run(created.data.id, memoryOn);
+  }
+
+  async function ask(question: string) {
+    setAsking(true);
+    setAskError(null);
+    const result = await api.assist({
+      question,
+      ...(incident ? { incident_id: incident.id } : {}),
+      ...(project ? { project_id: project.id } : {}),
+    });
+    setAsking(false);
+    if (result.ok) {
+      setAnswer(result.data);
+      setComposer("");
+    } else {
+      setAskError(result.error.message);
+    }
+  }
+
+  function submitComposer(text: string) {
+    voice.stop();
+    if (looksLikeError(text)) void investigate(text);
+    else void ask(text);
+  }
+
+  function simulate(demo: DemoChoice) {
+    stopSimulation();
+    reset();
+    setAnswer(null);
+    setSim({ demo, signals: [] });
+    demo.signals.forEach((signal) => {
+      simTimers.current.push(
+        window.setTimeout(() => setSim((s) => (s && s.demo.key === demo.key ? { ...s, signals: [...s.signals, signal] } : s)), signal.at_ms),
+      );
+    });
+    const last = Math.max(0, ...demo.signals.map((s) => s.at_ms)) + 700;
+    simTimers.current.push(
+      window.setTimeout(() => {
+        setSim(null);
+        void investigate(demo.alertText, { service: demo.service, severity: demo.severity });
+      }, last),
+    );
   }
 
   async function logAttempt(action: string, outcome: Outcome, notes = ""): Promise<boolean> {
@@ -271,177 +332,165 @@ export default function Console({ memoryOn, refreshStats, projectId }: { memoryO
     const result = await api.logAttempt(incident.id, { action, outcome, ...(notes ? { notes } : {}) });
     if (!result.ok) {
       setLogError(result.error.message);
+      setToast(null);
       return false;
     }
     setAttempts((a) => [...a, result.data]);
     setRecorded((r) => ({ ...r, [action]: outcome }));
+    setToast(result.data.memory_retained ? "Fix attempt saved to Hindsight memory." : "Fix attempt recorded. Hindsight did not confirm the save.");
     return true;
   }
 
   function onResolved(captured: ExperienceCaptured) {
     setExperience(captured);
     setIncident((i) => (i ? { ...i, status: "resolved" } : i));
-    setToast("Saved to memory. The next similar incident will know this.");
-    void api.memoryOverview().then((r) => r.ok && setOverview(r.data));
+    setResolveOpen(false);
+    setToast(captured.memory_retained ? "Saved to memory. The next similar incident will know this." : "Resolved. Hindsight did not confirm the save.");
     refreshStats();
   }
 
-  const onRun = runs.on;
-  const primary = runs[keyOf(memoryOn)] ?? onRun ?? runs.off;
+  const primary = runs[keyOf(memoryOn)] ?? runs.on ?? runs.off;
+  const other = primary ? runs[keyOf(!primary.memory)] : undefined;
   const bothDone = Boolean(runs.on?.diagnosis && runs.off?.diagnosis);
-  const timelineRun = onRun ?? primary;
-  const recallDone = Boolean(onRun?.steps.some((s) => s.name === "recall"));
-  const memoryState = onRun ? (onRun.unavailable ? "unavailable" : recallDone ? "ready" : "searching") : memoryOn ? "idle" : "off";
   const open = incident?.status === "open";
+  const resolved = incident?.status === "resolved";
+  const fixAction = primary?.diagnosis?.try_first?.action ?? null;
+  const busy = creating || asking || sim !== null;
+
+  const orb = voice.listening
+    ? ORB.listening
+    : running || creating || asking || sim
+      ? ORB.thinking
+      : experience?.memory_retained
+        ? ORB.success
+        : primary?.error || primary?.unavailable
+          ? ORB.warning
+          : !memoryOn
+            ? ORB.off
+            : ORB.idle;
+
+  const menu: MenuItem[] = incident
+    ? [
+        {
+          label: other ? (other.running ? "Comparison running..." : "Comparison below") : `Compare with memory ${primary?.memory ? "off" : "on"}`,
+          icon: <GitCompareArrows className="h-4 w-4" aria-hidden="true" />,
+          onSelect: () => primary && void run(incident.id, !primary.memory),
+          disabled: !primary || running || Boolean(other) || resolved,
+        },
+        { label: "Why FRIDAY thinks this", icon: <Brain className="h-4 w-4" aria-hidden="true" />, onSelect: () => setSheet("evidence"), disabled: !primary },
+        { label: "Log a fix attempt", icon: <ClipboardList className="h-4 w-4" aria-hidden="true" />, onSelect: () => setSheet("log"), disabled: !open },
+        { label: "Investigation log", icon: <ListTree className="h-4 w-4" aria-hidden="true" />, onSelect: () => setSheet("timeline"), disabled: !primary },
+        { label: "Open incident page", icon: <ExternalLink className="h-4 w-4" aria-hidden="true" />, onSelect: () => navigate(`/incidents/${incident.id}`) },
+        { label: "New incident", icon: <Plus className="h-4 w-4" aria-hidden="true" />, onSelect: () => { stopSimulation(); reset(); composerRef.current?.focus(); } },
+      ]
+    : [];
 
   return (
-    <div className="flex h-full flex-col">
-      <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 overflow-y-auto p-4 lg:grid-cols-[330px_minmax(0,1fr)_360px] lg:overflow-hidden">
-        <Panel title="Incident" icon={<Siren className="h-4 w-4 text-severity" aria-hidden="true" />}>
-          <AlertInput
-            draft={draft}
-            onDraftChange={setDraft}
-            demos={demos}
-            busy={running}
-            onSubmit={(d) => void submit(d)}
-            onNewIncident={newIncident}
-            hasIncident={incident !== null}
-            simulateRequest={simulateRequest}
-          />
-          {createError && <p className="mt-3 text-xs text-severity">{createError}</p>}
-        </Panel>
+    <div className="relative flex h-full flex-col overflow-hidden">
+      <WaveBackdrop />
+      <div className="relative min-h-0 flex-1 overflow-y-auto">
+        <div className="mx-auto w-full max-w-[1260px] space-y-5 px-6 pb-8 pt-2">
+          <FridayHero orb={orb} audio={voice.audio} compact={Boolean(incident || sim)} />
 
-        <div className="flex min-h-0 flex-col gap-4 lg:overflow-y-auto lg:pr-1">
-          {!incident ? (
-            <ConsoleHero
-              overview={overview}
-              demos={demos}
-              memoryOn={memoryOn}
-              onDiagnose={(demo) => {
-                const next = { alertText: demo.alertText, service: demo.service, severity: demo.severity };
-                setDraft(next);
-                void submit(next);
-              }}
-              onSimulate={(demo) => setSimulateRequest({ choice: demo, nonce: Date.now() })}
-            />
-          ) : (
+          <AnimatePresence>{answer && <AnswerPanel key={answer.question} answer={answer} onClose={() => setAnswer(null)} />}</AnimatePresence>
+          {(createError || askError) && <p className="panel px-5 py-3 text-sm text-severity">{createError ?? askError}</p>}
+          {sim && <SignalFeed demo={sim.demo} signals={sim.signals} />}
+
+          {incident && primary ? (
             <>
-              <div className="glass flex flex-wrap items-center gap-2.5 px-5 py-3.5">
-                <IncidentChip id={incident.id} tone={open ? "severity" : "success"} />
-                <SeverityBadge severity={incident.severity} />
-                <span className="font-mono text-xs text-muted">{incident.service}</span>
-                <span className="min-w-0 flex-1 truncate text-sm text-ink">{incident.title}</span>
-                <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${open ? "bg-severity/10 text-severity" : "bg-success/10 text-success"}`}>
-                  {incident.status}
-                </span>
-              </div>
+              <motion.section initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="panel p-5">
+                <IncidentHeader incident={incident} steps={primary.steps} menu={menu} />
+                <div className="mt-6">
+                  <StageRail run={primary} resolved={Boolean(resolved)} retained={experience ? experience.memory_retained : null} />
+                </div>
+                <div className="mt-5 grid gap-3 lg:grid-cols-3">
+                  <TeamMemoryCard run={primary} onOpen={() => setSheet("evidence")} />
+                  <CodeCard run={primary} projectName={project?.name ?? primary.diagnosis?.project ?? null} onConnect={onConnectProject} />
+                  <RootCauseCard run={primary} onOpen={() => setSheet("evidence")} onRetry={() => void run(incident.id, primary.memory)} />
+                </div>
+              </motion.section>
 
-              {timelineRun && (
-                <Lifecycle
-                  memoryOn={timelineRun.memory}
-                  steps={timelineRun.steps}
-                  running={timelineRun.running}
-                  diagnosis={timelineRun.diagnosis}
-                  retained={experience ? experience.memory_retained : null}
-                  matchedCount={timelineRun.matched.length}
-                />
-              )}
+              <NextStepsCard
+                run={primary}
+                incident={incident}
+                recorded={fixAction ? recorded[fixAction] ?? null : null}
+                resolved={Boolean(resolved)}
+                onOutcome={(action, outcome) => void logAttempt(action, outcome)}
+                onResolve={() => setResolveOpen(true)}
+                onDetails={() => setSheet("evidence")}
+                onLogAttempt={() => setSheet("log")}
+              />
+              {logError && <p className="px-2 text-xs text-severity">{logError}</p>}
 
-              <Panel title="Diagnosis" icon={<Activity className="h-4 w-4 text-memory" aria-hidden="true" />} className="shrink-0">
-                {primary?.error ? (
-                  <div className="space-y-3">
-                    <p className="text-sm text-severity">{primary.error}</p>
-                    <button type="button" onClick={() => void run(incident.id, primary.memory)} className="btn btn-secondary btn-sm">
-                      <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" /> Retry
-                    </button>
-                  </div>
-                ) : bothDone && runs.off?.diagnosis && runs.on?.diagnosis ? (
-                  <div className="space-y-4">
-                    <div className="grid gap-3 xl:grid-cols-2">
-                      <DiagnosisCard diagnosis={runs.off.diagnosis} compact />
-                      <DiagnosisCard
-                        diagnosis={runs.on.diagnosis}
-                        compact
-                        recorded={runs.on.diagnosis.try_first ? recorded[runs.on.diagnosis.try_first.action] ?? null : null}
-                        onOutcome={open ? (action, outcome) => void logAttempt(action, outcome) : undefined}
-                      />
-                    </div>
-                    <ImpactRow off={runs.off.diagnosis} on={runs.on.diagnosis} />
-                  </div>
-                ) : primary?.diagnosis ? (
-                  <ConsoleDiagnosis
-                    diagnosis={primary.diagnosis}
-                    recorded={primary.diagnosis.try_first ? recorded[primary.diagnosis.try_first.action] ?? null : null}
-                    onOutcome={open && primary.diagnosis.memory_enabled ? (action, outcome) => void logAttempt(action, outcome) : undefined}
-                  />
-                ) : (
-                  <div className="space-y-4">
-                    {primary?.memory && primary.fix && primary.matched.length > 0 ? (
-                      <FixHistory matched={primary.matched} worked={primary.fix.worked} failed={primary.fix.failed} final={false} strong={false} />
-                    ) : (
-                      <div className="space-y-2">
-                        <div className="h-4 w-2/3 animate-pulse rounded-full bg-white/[0.07]" />
-                        <div className="h-4 w-1/2 animate-pulse rounded-full bg-white/[0.07]" />
+              {other && (
+                <section className="panel space-y-4 p-5">
+                  <h2 className="flex items-center gap-2 text-[15px] font-medium text-ink">
+                    <GitCompareArrows className="h-4 w-4" aria-hidden="true" /> Same incident, with and without memory
+                  </h2>
+                  {bothDone && runs.off?.diagnosis && runs.on?.diagnosis ? (
+                    <>
+                      <div className="grid gap-3 xl:grid-cols-2">
+                        <DiagnosisCard diagnosis={runs.off.diagnosis} compact />
+                        <DiagnosisCard diagnosis={runs.on.diagnosis} compact />
                       </div>
-                    )}
-                    <p className="text-xs text-muted">
-                      {primary?.memory === false ? "Asking the model without memory..." : "The verified diagnosis appears when the investigation below finishes."}
-                    </p>
-                  </div>
-                )}
-                {runs.on?.diagnosis && runs.off === undefined && !running && open && (
-                  <p className="mt-3 text-xs text-muted">Turn Memory off in the top bar to compare with a generic answer.</p>
-                )}
-              </Panel>
-
-              {timelineRun && (timelineRun.running || timelineRun.error) && (
-                <Panel title="Investigation" icon={<ListTree className="h-4 w-4 text-memory" aria-hidden="true" />} className="shrink-0">
-                  <InvestigationTimeline
-                    memory={timelineRun.memory}
-                    steps={timelineRun.steps}
-                    running={timelineRun.running}
-                    startedAt={timelineRun.startedAt}
-                    matchedCount={timelineRun.matched.length}
-                  />
-                </Panel>
+                      <ImpactRow off={runs.off.diagnosis} on={runs.on.diagnosis} />
+                    </>
+                  ) : other.error ? (
+                    <p className="text-sm text-severity">{other.error}</p>
+                  ) : (
+                    <p className="text-sm text-muted">Running the {other.memory ? "memory" : "no-memory"} answer for comparison...</p>
+                  )}
+                </section>
               )}
 
-              {experience ? (
-                <ExperienceCard experience={experience} />
-              ) : (
-                <Panel title="Action log" icon={<ClipboardList className="h-4 w-4 text-memory" aria-hidden="true" />} className="shrink-0">
-                  <ActionLog attempts={attempts} onLog={logAttempt} disabled={!open} />
-                  {logError && <p className="mt-2 text-xs text-severity">{logError}</p>}
-                </Panel>
-              )}
+              {experience && <ExperienceCard experience={experience} />}
             </>
-          )}
-        </div>
-
-        <Panel title={incident ? "Why I think this" : "Team memory"} icon={<BrainCircuit className="h-4 w-4 text-memory" aria-hidden="true" />}>
-          {memoryState === "idle" || memoryState === "off" ? (
-            <MemorySnapshot overview={overview} memoryOn={memoryOn} />
           ) : (
-            <MemoryPanel
-              state={memoryState}
-              matched={onRun?.matched ?? []}
-              recalled={onRun?.recalled ?? []}
-              cited={onRun?.diagnosis?.cited_incidents ?? []}
-            />
+            !sim && <IdleWorkspace demos={demos} busy={busy} onDiagnose={(d) => void investigate(d.alertText, { service: d.service, severity: d.severity })} onSimulate={simulate} />
           )}
-        </Panel>
+
+          <section className="panel px-5 py-4">
+            <div className="flex items-center gap-2 pb-1 text-xs text-muted lg:hidden">
+              <TrendingUp className="h-3.5 w-3.5" aria-hidden="true" /> Learning curve
+            </div>
+            <LearningCurve points={learning} />
+          </section>
+        </div>
       </div>
 
-      <footer className="glass-bar flex shrink-0 items-center gap-4 border-t border-white/[0.07] px-5 py-3">
-        <LearningCurve points={learning} />
-        <button type="button" disabled={!incident || !open || running} onClick={() => setResolveOpen(true)} className="btn btn-primary btn-lg shrink-0">
-          <CheckCheck className="h-4 w-4" aria-hidden="true" /> Resolve and learn
-        </button>
-      </footer>
+      <div className="relative shrink-0 px-6 pb-5 pt-2">
+        <Composer ref={composerRef} value={composer} onChange={setComposer} onSubmit={submitComposer} busy={busy} voice={voice} />
+      </div>
 
-      {incident && (
-        <ResolveDrawer key={incident.id} incident={incident} open={resolveOpen} onClose={() => setResolveOpen(false)} onResolved={onResolved} />
-      )}
+      <Sheet open={sheet === "evidence"} title="Why FRIDAY thinks this" onClose={closeSheet} width="max-w-2xl">
+        {primary && (
+          <div className="space-y-6">
+            {primary.diagnosis && !primary.diagnosis.degraded && <ResultView diagnosis={primary.diagnosis} />}
+            {primary.diagnosis?.degraded && <p className="text-sm leading-6 text-ink">{primary.diagnosis.summary}</p>}
+            <div className="space-y-3">
+              <h3 className="eyebrow">What Hindsight recalled</h3>
+              <MemoryPanel
+                state={!primary.memory ? "off" : primary.unavailable ? "unavailable" : primary.steps.some((s) => s.name === "recall") ? "ready" : "searching"}
+                matched={primary.matched}
+                recalled={primary.recalled}
+                cited={primary.diagnosis?.cited_incidents ?? []}
+              />
+            </div>
+          </div>
+        )}
+      </Sheet>
+      <Sheet open={sheet === "log"} title="Fix attempts" onClose={closeSheet}>
+        <p className="mb-4 text-sm text-muted">Record everything you try, including what failed. Each attempt is saved to Hindsight so the next engineer is warned.</p>
+        <ActionLog attempts={attempts} onLog={logAttempt} disabled={!open} />
+        {logError && <p className="mt-2 text-xs text-severity">{logError}</p>}
+      </Sheet>
+      <Sheet open={sheet === "timeline"} title="Investigation log" onClose={closeSheet}>
+        {primary && (
+          <InvestigationTimeline memory={primary.memory} steps={primary.steps} running={primary.running} startedAt={primary.startedAt} matchedCount={primary.matchedCount} />
+        )}
+      </Sheet>
+
+      {incident && <ResolveDrawer key={incident.id} incident={incident} open={resolveOpen} onClose={() => setResolveOpen(false)} onResolved={onResolved} />}
       <Toast message={toast} onDone={clearToast} />
     </div>
   );

@@ -1,8 +1,8 @@
-# On-Call Copilot
+# FRIDAY
 
 **Your engineering team's memory, always one shortcut away.**
 
-On-Call Copilot is a desktop incident-response agent that remembers what your team learned the hard way: what failed, what worked, and why. When something breaks, press the shortcut. The Copilot reads your current context, recalls the team's past incidents from [Hindsight](https://hindsight.vectorize.io/), checks your project for the settings those incidents changed, and tells you:
+FRIDAY is a desktop engineering assistant that remembers what your team learned the hard way: what failed, what worked, and why. When something breaks, press the shortcut. FRIDAY reads your screen (on request, until you stop it), recalls the team's past incidents from [Hindsight](https://hindsight.vectorize.io/), checks your project for the settings those incidents changed, and tells you:
 
 - what is most likely happening, with the incidents that show it
 - the fix to try first, and where it worked before
@@ -12,6 +12,17 @@ On-Call Copilot is a desktop incident-response agent that remembers what your te
 You apply the fix, mark it Worked, and Resolve and learn: the experience is retained in Hindsight, and the next similar incident recalls it.
 
 Built for "AI Agents That Learn Using Hindsight" (HackwithHyderabad 3.0). Product overview: [ABOUT.md](ABOUT.md). Desktop design and decisions: [docs/DESKTOP_AGENT.md](docs/DESKTOP_AGENT.md). Spec: [docs/PRD.md](docs/PRD.md).
+
+## Reading your screen
+
+Press Ctrl+Space and choose **Read my screen**. The card docks to the bottom-right corner, a pale blue border shows the screen is being read, and FRIDAY reads the display with Windows' built-in OCR every couple of seconds until you press **Stop**. Frames stay on your computer and are deleted after each read; FRIDAY's own windows are never captured.
+
+- An error that appears (in a terminal, VS Code, Antigravity, Cursor, JetBrains or any other app) is checked against Hindsight memory and your authorized project straight away.
+- The card names the IDE and folder in front of you; **Connect <folder>** lets FRIDAY inspect that folder, through the usual consent dialog.
+- When the error disappears from your screen, FRIDAY asks "Did this fix work?", and Resolve and learn retains the outcome.
+- Ask anything in the card ("Where should I fix this?", "Why shouldn't I restart Redis?"). Answers come from `POST /api/assist`, with each fact labelled SCREEN, PROJECT or HINDSIGHT.
+
+Demo: run `python demo/nimbus-pay/scripts/run_payments_api.py` in your IDE's terminal. It fails with `redis.exceptions.ConnectionError: Too many connections`; edit `REDIS_MAX_POOL` in `demo/nimbus-pay/deploy/helm/payments-api/values-prod.yaml` and the simulated service rolls out a new pod and recovers, which FRIDAY sees on screen. `python scripts/reset_demo.py` restores the starting state.
 
 ## The problem
 

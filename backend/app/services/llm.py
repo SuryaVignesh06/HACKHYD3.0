@@ -16,7 +16,7 @@ import httpx
 from pydantic import BaseModel, ValidationError
 
 from app.config import Settings, get_settings
-from app.models import AttemptFacts, CodeFinding, DiagnosisDraft, MatchedIncident, PostmortemText, RecalledMemory
+from app.models import AssistDraft, AttemptFacts, CodeFinding, DiagnosisDraft, MatchedIncident, PostmortemText, RecalledMemory
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +42,7 @@ DIAGNOSIS_SCHEMA = """{
   "unknowns": [string]          // 1-3 things memory and the project cannot tell us yet
 }"""
 
-FORMAT_SYSTEM = f"""You are the formatting layer of On-Call Copilot, an incident-response agent for Nimbus Pay.
+FORMAT_SYSTEM = f"""You are the formatting layer of FRIDAY, an engineering memory agent for Nimbus Pay.
 You do not have your own knowledge of this company. Use ONLY the MATCHED INCIDENTS, ATTEMPT LOG,
 RECALLED MEMORIES and HINDSIGHT REFLECTION in the user message.
 
@@ -90,7 +90,7 @@ Rules: never mention incident IDs; every "evidence" and "attempt_refs" list must
 confidence reflects that you are guessing without history (at most 0.5)."""
 
 
-POSTMORTEM_SYSTEM = """You draft incident postmortems for On-Call Copilot at Nimbus Pay.
+POSTMORTEM_SYSTEM = """You draft incident postmortems for FRIDAY at Nimbus Pay.
 Use ONLY the incident, the fix attempts and the diagnosis in the user message. Do not invent
 events, numbers or people. Write plainly, like a good engineering postmortem.
 Reply with exactly one JSON object and nothing else:
@@ -103,7 +103,7 @@ Reply with exactly one JSON object and nothing else:
 Mention every FAILED attempt in the summary or root cause so the next engineer does not repeat it."""
 
 
-SCREEN_SYSTEM = """You read a screenshot of an engineer's screen for On-Call Copilot.
+SCREEN_SYSTEM = """You read a screenshot of an engineer's screen for FRIDAY.
 Find any visible error, alert, stack trace or failing log output (terminal, editor, browser, dashboard).
 Reply with exactly one JSON object and nothing else:
 {
@@ -112,6 +112,33 @@ Reply with exactly one JSON object and nothing else:
   "text": string      // the visible error lines copied verbatim, most important first, at most 25 lines
 }
 Copy text exactly as shown; never invent lines, services or numbers that are not on screen."""
+
+
+ASSIST_SYSTEM = """You are FRIDAY, an engineering assistant for Nimbus Pay. The engineer asks a QUESTION about what
+they are looking at. Answer it using ONLY the evidence in the user message:
+- CURRENT CONTEXT: what is on their screen (or the open incident) right now;
+- PROJECT FINDINGS: lines read from their authorized repository just now;
+- MATCHED EXPERIENCES and FIX LOG: the team's past incidents from Hindsight memory, with what worked and what failed;
+- HINDSIGHT REFLECTION: Hindsight's reasoning across those experiences.
+You have no other knowledge of this company. Reply with exactly one JSON object and nothing else:
+{
+  "answer": string,               // 1-3 short sentences that directly answer the QUESTION
+  "recommendation": string|null,  // the single most supported change, with concrete values from the evidence; null if unsupported
+  "next_step": string|null,       // one imperative action the engineer can take now
+  "history": [ { "incident_id": "INC-xxx", "text": string } ]  // up to 3 relevant experiences, one sentence each
+}
+Rules:
+1. Only name incident IDs marked "citable". Never invent incident IDs, files, line numbers, values or numbers.
+2. If no experience is citable, the answer starts with "No previous engineering experience matched this problem."
+   and then uses only the current context and project findings; history is empty.
+3. Keep facts apart: what the screen or project shows now, what happened before (with incident IDs), and what you
+   recommend. Never present a recommendation as a fact.
+4. "Where" questions: answer with the file and line from PROJECT FINDINGS. If there are none, say the project did
+   not show where, rather than guessing a path.
+5. "Why not" questions: answer from FAILED attempts in the FIX LOG, naming the incidents. If the FIX LOG has no
+   FAILED attempt of that action, say memory has no record of it failing; never claim past failures you cannot cite.
+6. "What did we try" questions: list what worked and what failed, from the FIX LOG.
+7. Plain sentences, no markdown headings, no tables."""
 
 
 class ScreenReading(BaseModel):
@@ -215,7 +242,7 @@ class LLMService:
             f"{self.settings.OPENROUTER_BASE_URL}/chat/completions",
             headers={
                 "Authorization": f"Bearer {self.settings.OPENROUTER_API_KEY}",
-                "X-Title": "On-Call Copilot",
+                "X-Title": "FRIDAY",
             },
             json={
                 "model": model,
@@ -271,7 +298,7 @@ class LLMService:
             try:
                 response = await asyncio.wait_for(self.client.post(
                     f"{self.settings.OPENROUTER_BASE_URL}/chat/completions",
-                    headers={"Authorization": f"Bearer {self.settings.OPENROUTER_API_KEY}", "X-Title": "On-Call Copilot"},
+                    headers={"Authorization": f"Bearer {self.settings.OPENROUTER_API_KEY}", "X-Title": "FRIDAY"},
                     json={
                         "model": model,
                         "messages": [
@@ -295,6 +322,10 @@ class LLMService:
             except (httpx.HTTPError, ValueError, ValidationError, KeyError, IndexError, TimeoutError) as exc:
                 logger.warning("Vision call failed: model=%s error=%s: %s", model, type(exc).__name__, str(exc)[:300])
         raise LLMUnavailable("Both vision models failed.")
+
+    async def answer_question(self, prompt: str) -> tuple[AssistDraft, str]:
+        """Grounded answer to the engineer's question; the prompt carries every piece of evidence it may use."""
+        return await self.complete_json(ASSIST_SYSTEM, prompt, AssistDraft)
 
     async def draft_postmortem(self, incident_line: str, alert_text: str, attempts: list[AttemptFacts],
                                diagnosis_summary: str | None) -> tuple[PostmortemText, str]:

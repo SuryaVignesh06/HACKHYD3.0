@@ -1,18 +1,35 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { ArrowUp, Check, ChevronLeft, CircleAlert, CircleCheck, Code2, Loader2, Mic, PenLine, RotateCcw, ScanSearch, Square, Undo2, X } from "lucide-react";
+import {
+  ArrowUp,
+  Check,
+  ChevronLeft,
+  CircleAlert,
+  CircleCheck,
+  Code2,
+  FolderPlus,
+  ImageUp,
+  Loader2,
+  Mic,
+  RotateCcw,
+  ScanSearch,
+  Square,
+  Undo2,
+  X,
+} from "lucide-react";
+import AssistAnswerView from "../components/AssistAnswerView";
 import { ModeLine } from "../components/DiagnosisCard";
 import { IncidentChip, LinkedText } from "../components/IncidentPeek";
 import MarkdownLite from "../components/MarkdownLite";
 import Orb, { ORB } from "../components/Orb";
-import ResultView, { PastIncidentList } from "../components/ResultView";
+import ResultView from "../components/ResultView";
 import { Kbd, Switch } from "../components/ui";
 import { api, streamDiagnosis } from "../lib/api";
-import { desktop, looksLikeError, shortcutLabel, type Activation, type IdeContext } from "../lib/desktop";
-import { duration } from "../lib/format";
+import { desktop, looksLikeError, shortcutLabel, type Activation, type IdeContext, type WatchReading } from "../lib/desktop";
+import { duration, relativeAge } from "../lib/format";
 import { useVoice } from "../lib/voice";
 import type {
-  AskAnswer,
+  AssistAnswer,
   AttemptLogged,
   Diagnosis,
   ExperienceCaptured,
@@ -25,14 +42,20 @@ import type {
   StreamEvent,
 } from "../lib/types";
 
-type Phase = "consent" | "reading" | "found" | "home" | "working" | "diagnosis" | "answer" | "resolve" | "learned";
+type Phase = "consent" | "watching" | "home" | "working" | "diagnosis" | "resolve" | "learned";
 type Intent = "investigate" | "ask";
 type Finding = { kind: "screen" | "logs" | "clipboard"; title: string; label: string; text: string };
+/** One question asked in the card and FRIDAY's grounded answer. */
+type ChatTurn = { id: number; question: string; answer: AssistAnswer | null; error: string | null };
+/** The "Read my screen" session: FRIDAY reads the screen until the engineer stops it. */
+type WatchState = { starting: boolean; last: WatchReading | null; clearReads: number };
 /** What the engineer reports after applying the fix. "reverted" is stored as a failed attempt with a note. */
 type Reported = "worked" | "partial" | "failed" | "reverted";
 
 const PROJECT_KEY = "oncall.overlay.project";
-const MIN_READING_MS = 1100; // keep the edge waves on long enough to register, even when OCR is instant
+const CARD_MARGIN = 20; // transparent margin around the card in the desktop window, room for its soft shadow
+const CLEAR_READS = 2; // consecutive reads without the error before FRIDAY treats it as gone from the screen
+const MAX_IMAGE_BYTES = 6 * 1024 * 1024;
 
 const REPORTED: { value: Reported; label: string; icon: JSX.Element; tone: string }[] = [
   { value: "worked", label: "Worked", icon: <Check className="h-3.5 w-3.5" aria-hidden="true" />, tone: "btn-success" },
@@ -95,7 +118,6 @@ export default function Overlay() {
   const [projects, setProjects] = useState<ProjectOut[] | null>(null);
   const [projectId, setProjectId] = useState<number | null>(readStoredProject());
   const [fallback, setFallback] = useState<Finding | null>(null);
-  const [finding, setFinding] = useState<Finding | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [composer, setComposer] = useState("");
   const [forced, setForced] = useState<Intent | null>(null);
@@ -105,8 +127,11 @@ export default function Overlay() {
   const [steps, setSteps] = useState<InvestigationStep[]>([]);
   const [matched, setMatched] = useState<MatchedIncident[]>([]);
   const [diagnosis, setDiagnosis] = useState<Diagnosis | null>(null);
-  const [answer, setAnswer] = useState<AskAnswer | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [chat, setChat] = useState<ChatTurn[]>([]);
+  const [watch, setWatch] = useState<WatchState | null>(null);
+  const [pendingError, setPendingError] = useState<WatchReading | null>(null);
+  const [errorGone, setErrorGone] = useState(false);
+  const [readingImage, setReadingImage] = useState(false);  const [error, setError] = useState<string | null>(null);
   const [startedAt, setStartedAt] = useState(Date.now());
   const [now, setNow] = useState(Date.now());
   const [attempts, setAttempts] = useState<AttemptLogged[]>([]);
@@ -126,21 +151,47 @@ export default function Overlay() {
   projectRef.current = projectId;
   const sheetInputRef = useRef<HTMLInputElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const watchRef = useRef(watch);
+  watchRef.current = watch;
+  const incidentRef = useRef<IncidentCreated | null>(null);
+  // The error FRIDAY is handling; the same error scrolling in a terminal must not open a second incident.
+  const handledError = useRef<string | null>(null);
+  const clearRef = useRef(0);
+  const candidate = useRef<{ fingerprint: string; reads: number } | null>(null);
+  const chatId = useRef(0);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  // A new question or answer scrolls into view at the bottom of the card.
+  useEffect(() => {
+    if (chat.length) bodyRef.current?.scrollTo({ top: bodyRef.current.scrollHeight, behavior: "smooth" });
+  }, [chat]);
 
   const voice = useVoice((text) => setComposer((c) => (c.trim() ? `${c.trim()} ${text}` : text)));
   const project = projects?.find((p) => p.id === projectId) ?? null;
   const shortcut = shortcutLabel(desktop?.shortcut ?? "Control+Space");
   const intent: Intent = forced ?? (looksLikeError(composer) ? "investigate" : "ask");
-  const ide = activation?.ide ?? null;
+  const ide = watch?.last?.ide ?? activation?.ide ?? null;
   const ideProject = ide?.folderPath ? projects?.find((p) => samePath(p.root_path, ide.folderPath!)) ?? null : null;
   const needsFolderConsent = Boolean(desktop?.authorizeFolder && ide?.folderPath && projects !== null && !ideProject);
 
-  // The desktop window is an acrylic surface; the page itself stays transparent so the OS blur shows through.
+  // The desktop window is fully transparent and sized to the card, so the page background must stay clear.
   useEffect(() => {
     if (!desktop) return;
     document.body.style.background = "transparent";
     document.documentElement.style.background = "transparent";
   }, []);
+
+  // Keep the window hugging the card. offsetHeight ignores the open animation's transform, so this is the final size.
+  const cardRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const card = cardRef.current;
+    if (!desktop?.fitOverlay || !card) return;
+    const report = () => desktop?.fitOverlay?.(card.offsetHeight + CARD_MARGIN * 2);
+    report();
+    const observer = new ResizeObserver(report);
+    observer.observe(card);
+    return () => observer.disconnect();
+  }, [openKey]);
 
   const loadProjects = useCallback(async (): Promise<ProjectOut[]> => {
     const result = await api.projects();
@@ -173,16 +224,17 @@ export default function Overlay() {
   const reset = useCallback(
     (payload: Activation | null) => {
       abort.current?.abort();
-      setPhase(desktop?.readScreen ? "consent" : "home");
+      setPhase(watchRef.current ? "watching" : desktop?.watchStart ? "consent" : "home");
       setIncident(null);
       setWorking(null);
       setSteps([]);
       setMatched([]);
       setDiagnosis(null);
-      setAnswer(null);
+      setChat([]);
+      setPendingError(null);
+      setErrorGone(false);
       setError(null);
       setNotice(null);
-      setFinding(null);
       setAttempts([]);
       setSheet(null);
       setAction("");
@@ -233,7 +285,7 @@ export default function Overlay() {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape" || document.querySelector('[role="dialog"]')) return;
       if (sheet) setSheet(null);
-      else dismiss();
+      else if (!watchRef.current) dismiss();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -246,14 +298,18 @@ export default function Overlay() {
   }, [phase]);
 
   useEffect(() => {
-    if (phase === "home" || phase === "answer") window.setTimeout(() => composerRef.current?.focus({ preventScroll: true }), 120);
+    if (phase === "home") window.setTimeout(() => composerRef.current?.focus({ preventScroll: true }), 120);
   }, [phase]);
 
-  /** Yes: allow the IDE folder if needed (native dialog), then read the screen once, with the edge waves on. */
-  async function readScreenNow() {
-    if (!desktop?.readScreen) return;
+  /** Yes: allow the IDE folder if needed (native dialog), then read the screen until the engineer presses Stop. */
+  async function startWatching() {
+    if (!desktop?.watchStart) return;
     setNotice(null);
-    setPhase("reading");
+    setError(null);
+    clearRef.current = 0;
+    handledError.current = null;
+    setWatch({ starting: true, last: null, clearReads: 0 });
+    setPhase("watching");
     if (needsFolderConsent && ide?.folderPath && desktop.authorizeFolder) {
       const allowed = await desktop.authorizeFolder(ide.folderPath);
       if ("project" in allowed) {
@@ -264,20 +320,112 @@ export default function Overlay() {
     } else if (ideProject) {
       setProjectId(ideProject.id);
     }
-    const started = Date.now();
-    const reading = await desktop.readScreen();
-    const wait = MIN_READING_MS - (Date.now() - started);
-    if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
-    if (reading.ok && reading.found) {
-      setFinding({ kind: "screen", title: "I found this on your screen", label: `Read on this computer in ${duration(reading.ms)}, not saved`, text: reading.text });
-      setPhase("found");
-    } else if (fallback) {
-      setFinding({ ...fallback, title: reading.ok ? `Nothing on screen, but ${fallback.title.charAt(0).toLowerCase()}${fallback.title.slice(1)}` : fallback.title });
-      setNotice(reading.ok ? null : reading.message ?? null);
-      setPhase("found");
-    } else {
-      setNotice(reading.ok ? `I read ${reading.lineCount} lines on your screen but none looked like an error. Paste it or describe it below.` : reading.message ?? "Screen reading failed.");
+    const started = await desktop.watchStart();
+    if (!started.ok) {
+      setWatch(null);
+      setNotice(started.message);
       setPhase("home");
+    }
+  }
+
+  function stopWatching() {
+    desktop?.watchStop?.();
+    setWatch(null);
+    setPendingError(null);
+    handledError.current = null;
+    if (phaseRef.current === "watching") setPhase("home");
+  }
+
+  /** Connects the folder open in the engineer's IDE, through the same native consent dialog. */
+  async function connectIdeFolder() {
+    if (!ide?.folderPath || !desktop?.authorizeFolder) return;
+    const allowed = await desktop.authorizeFolder(ide.folderPath);
+    if ("project" in allowed) {
+      storeProject(allowed.project.id);
+      setProjectId(allowed.project.id);
+      await loadProjects();
+    } else if ("error" in allowed) {
+      setNotice(allowed.error);
+    }
+  }
+
+  /** Every read of the screen: a new error is investigated at once; a gone error prompts for the outcome. */
+  const onReading = useRef<(reading: WatchReading) => void>(() => undefined);
+  onReading.current = (reading: WatchReading) => {
+    clearRef.current = reading.ok && !reading.found ? clearRef.current + 1 : reading.found ? 0 : clearRef.current;
+    setWatch((w) => (w ? { starting: false, last: reading, clearReads: clearRef.current } : w));
+    if (!reading.ok) return;
+    const folder = reading.ide?.folderPath;
+    const match = folder ? projects?.find((p) => samePath(p.root_path, folder)) : undefined;
+    if (match && match.id !== projectRef.current) setProjectId(match.id);
+
+    const current = phaseRef.current;
+    const open = incidentRef.current?.status === "open";
+    const busy = current === "working" || current === "resolve" || (current === "diagnosis" && open);
+    if (reading.found && reading.fingerprint) {
+      if (reading.fingerprint === handledError.current) {
+        if (errorGone) setErrorGone(false); // it came back: the fix did not hold
+        return;
+      }
+      // A new error must be read twice in a row before FRIDAY acts on it, so one garbled OCR frame never opens an incident.
+      const seen = candidate.current;
+      candidate.current = { fingerprint: reading.fingerprint, reads: seen?.fingerprint === reading.fingerprint ? seen.reads + 1 : 1 };
+      if (candidate.current.reads < 2) return;
+      if (busy) {
+        setPendingError(reading);
+        return;
+      }
+      handledError.current = reading.fingerprint;
+      setPendingError(null);
+      void investigate(reading.text, "screen");
+      return;
+    }
+    if (clearRef.current >= CLEAR_READS) {
+      setPendingError(null);
+      if (current === "diagnosis" && open && handledError.current) setErrorGone(true);
+      // Once the screen is clear and nothing is open, the same error appearing again is a new incident.
+      if (!busy) handledError.current = null;
+    }
+  };
+
+  useEffect(() => {
+    if (!desktop?.onWatch) return;
+    const offReading = desktop.onWatch((reading) => onReading.current(reading));
+    const offEnded = desktop.onWatchEnded?.((payload) => {
+      setWatch(null);
+      setNotice(payload.reason);
+      if (phaseRef.current === "watching") setPhase("home");
+    });
+    const offFocus = desktop.onFocusComposer?.(() => composerRef.current?.focus({ preventScroll: true }));
+    return () => {
+      offReading();
+      offEnded?.();
+      offFocus?.();
+    };
+  }, []);
+
+  /** Screen reading unavailable: the engineer can hand FRIDAY a screenshot instead (read by the vision model). */
+  async function readScreenshot(file: File) {
+    if (!/^image\/(png|jpeg)$/.test(file.type) || file.size > MAX_IMAGE_BYTES) {
+      setNotice("Use a PNG or JPEG screenshot under 6 MB.");
+      return;
+    }
+    setReadingImage(true);
+    setNotice(null);
+    const dataUrl = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(file);
+    }).catch(() => "");
+    const result = dataUrl ? await api.readScreen(dataUrl) : null;
+    setReadingImage(false);
+    if (!result) setNotice("The screenshot could not be read from disk.");
+    else if (!result.ok) setNotice(result.error.message);
+    else if (!result.data.found) setNotice(`No error found in the screenshot (read by ${result.data.model}).`);
+    else {
+      setComposer(result.data.text.trim());
+      setNotice(`Read from your screenshot by ${result.data.model}. Check it, then send.`);
     }
   }
 
@@ -294,6 +442,9 @@ export default function Overlay() {
       return;
     }
     setIncident(created.data);
+    incidentRef.current = created.data;
+    setErrorGone(false);
+    setChat([]);
     setWorking({ kind: "investigate", text: alertText });
     setSteps([]);
     setMatched([]);
@@ -321,30 +472,34 @@ export default function Overlay() {
     );
   }
 
+  /** A question about what the engineer is looking at: screen + memory + project, answered with sources. */
   async function ask(question: string) {
-    if (question.trim().length < 3) return;
+    const text = question.trim();
+    if (text.length < 2) return;
     voice.stop();
     setError(null);
-    setWorking({ kind: "ask", text: question.trim() });
-    setPhase("working");
-    setStartedAt(Date.now());
-    const result = await api.ask(question.trim());
-    if (result.ok) {
-      setAnswer(result.data);
-      setComposer("");
-      setForced(null);
-      setPhase("answer");
-    } else {
-      setError(result.error.message);
-      setPhase(answer ? "answer" : "home");
-    }
+    const id = ++chatId.current;
+    setChat((c) => [...c, { id, question: text, answer: null, error: null }]);
+    setComposer("");
+    setForced(null);
+    if (phaseRef.current === "consent") setPhase("home");
+    const screen = watchRef.current?.last?.found ? watchRef.current.last.text : undefined;
+    const result = await api.assist({
+      question: text,
+      ...(screen ? { screen_text: screen } : {}),
+      ...(incidentRef.current ? { incident_id: incidentRef.current.id } : {}),
+      ...(projectRef.current !== null ? { project_id: projectRef.current } : {}),
+    });
+    setChat((c) => c.map((turn) => (turn.id === id ? { ...turn, answer: result.ok ? result.data : null, error: result.ok ? null : result.error.message } : turn)));
   }
 
   function submit() {
     const text = composer.trim();
     if (!text) return;
-    if (intent === "investigate") void investigate(text, "manual");
-    else if (memoryOn) void ask(text);
+    if (intent === "investigate") {
+      setComposer("");
+      void investigate(text, "manual");
+    } else void ask(text);
   }
 
   async function record(what: string, outcome: Outcome, note = ""): Promise<AttemptLogged | null> {
@@ -402,6 +557,8 @@ export default function Overlay() {
     setSaving(false);
     if (result.ok) {
       setExperience(result.data);
+      if (incidentRef.current) incidentRef.current = { ...incidentRef.current, status: "resolved" };
+      setErrorGone(false);
       setPhase("learned");
     } else {
       setError(result.error.message);
@@ -411,10 +568,10 @@ export default function Overlay() {
   // ------------------------------------------------------------------ derived view state
 
   const recallStep = steps.find((s) => s.name === "recall");
-  const unavailable = Boolean(recallStep?.detail.startsWith("Hindsight unavailable") || diagnosis?.memory_unavailable || answer?.memory_unavailable);
+  const unavailable = Boolean(recallStep?.detail.startsWith("Hindsight unavailable") || diagnosis?.memory_unavailable);
   const orbState = voice.listening
     ? ORB.listening
-    : phase === "working" || phase === "reading"
+    : phase === "working" || watch?.starting
       ? ORB.thinking
       : phase === "learned" && experience?.memory_retained
         ? ORB.success
@@ -438,11 +595,12 @@ export default function Overlay() {
                 ? "Checking your project..."
                 : "Verifying every citation...";
   const affectedFile = diagnosis?.findings[0] ? `${diagnosis.findings[0].path}:${diagnosis.findings[0].line}` : null;
-  const answerCited = answer ? Array.from(new Set(answer.answer.match(/\bINC-\d{3,}\b/g) ?? [])) : [];
   const learnedHere = diagnosis?.matched.find((m) => m.learned_live && diagnosis.cited_incidents.includes(m.id));
-  const wide = phase === "diagnosis" || phase === "answer" || phase === "resolve" || phase === "working" || phase === "learned";
-  const showComposer = phase === "home" || phase === "answer";
-  const showHeader = phase !== "consent" && phase !== "reading";
+  const wide = phase === "diagnosis" || phase === "resolve" || phase === "working" || phase === "learned" || chat.length > 0;
+  const showComposer = phase === "home" || phase === "watching" || phase === "diagnosis" || phase === "learned";
+  const showHeader = phase !== "consent";
+  const last = watch?.last ?? null;
+  const readAgo = last ? relativeAge(last.at) : null;
 
   const headline = diagnosis ? (
     diagnosis.memory_unavailable ? (
@@ -462,23 +620,14 @@ export default function Overlay() {
 
   return (
     <div
-      className={desktop ? "relative flex h-screen w-screen flex-col overflow-hidden select-none bg-transparent" : "fixed inset-0 flex items-center justify-center p-6 bg-black/60 backdrop-blur-md"}
+      className={desktop ? "relative flex h-screen w-screen items-center justify-center overflow-hidden p-5 select-none bg-transparent" : "fixed inset-0 flex items-center justify-center p-6 bg-[#101010]/80 backdrop-blur-md"}
       onMouseDown={(e) => {
         if (!desktop && e.target === e.currentTarget && !sheet) dismiss();
       }}
     >
-      <AnimatePresence>
-        {phase === "reading" && (
-          <motion.div key="glow" className="screen-glow" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.3 }}>
-            <span />
-            <span />
-            <span />
-          </motion.div>
-        )}
-      </AnimatePresence>
-
       <motion.div
         key={openKey}
+        ref={cardRef}
         layout
         initial={{ opacity: 0, scale: 0.94, y: 12 }}
         animate={closing ? { opacity: 0, scale: 0.94, y: 8 } : { opacity: 1, scale: 1, y: 0 }}
@@ -486,10 +635,40 @@ export default function Overlay() {
         onAnimationComplete={() => {
           if (closing) desktop?.hide();
         }}
-        className={`glass-strong glass-fluid relative flex flex-col overflow-hidden rounded-[26px] border border-white/[0.14] shadow-[0_24px_80px_rgba(0,0,0,0.85)] bg-[#101010]/85 ${
-          desktop ? "h-full w-full" : `max-h-[86vh] w-full ${wide ? "max-w-[500px]" : "max-w-[420px]"}`
+        className={`glass-strong glass-fluid relative flex w-full flex-col overflow-hidden rounded-[26px] border border-white/20 bg-bg ${
+          desktop ? "max-h-[680px] shadow-[0_6px_16px_rgba(0,0,0,0.45)]" : `max-h-[86vh] shadow-[0_24px_80px_rgba(0,0,0,0.85)] ${wide ? "max-w-[500px]" : "max-w-[420px]"}`
         }`}
       >
+        {watch && (
+          <div className="flex shrink-0 items-center gap-3 border-b border-sky-300/15 bg-sky-400/[0.06] px-4 py-2.5">
+            <span className="relative flex h-2.5 w-2.5 shrink-0" aria-hidden="true">
+              {!watch.starting && last?.ok && <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-sky-300/60" />}
+              <span className={`relative inline-flex h-2.5 w-2.5 rounded-full ${last && !last.ok ? "bg-severity" : "bg-sky-300"}`} />
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="text-xs font-medium text-ink">
+                {watch.starting || !last ? "Starting screen reading..." : last.ok ? "Reading your screen" : "FRIDAY couldn't read the current screen"}
+              </p>
+              <p className="truncate text-[11px] text-muted" title={last?.message}>
+                {last && !last.ok
+                  ? last.message
+                  : last
+                    ? `${ide ? `${ide.ide}${ide.folder ? ` · ${ide.folder}` : ""}` : last.window?.app || last.window?.process || "Your screen"} · ${
+                        last.found ? "error on screen" : "no error visible"
+                      } · read ${readAgo}`
+                    : "Frames stay on this computer and are never saved"}
+              </p>
+            </div>
+            {ide?.folderPath && !ideProject && desktop?.authorizeFolder && (
+              <button type="button" onClick={() => void connectIdeFolder()} className="btn btn-ghost !px-2 !py-1 text-[11px]" title={`Let FRIDAY read ${ide.folderPath}`}>
+                <FolderPlus className="h-3.5 w-3.5" aria-hidden="true" /> Connect {ide.folder}
+              </button>
+            )}
+            <button type="button" onClick={stopWatching} className="btn btn-secondary !px-2.5 !py-1 text-[11px]">
+              <Square className="h-3 w-3 fill-current" aria-hidden="true" /> Stop
+            </button>
+          </div>
+        )}
         {showHeader && (
           <header
             className="flex shrink-0 items-center gap-2 px-4 pb-1 pt-3.5 select-none"
@@ -523,76 +702,68 @@ export default function Overlay() {
           </header>
         )}
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-5">
+        <div ref={bodyRef} className="min-h-0 overflow-y-auto px-6 pb-5">
           <AnimatePresence mode="wait" initial={false}>
             {phase === "consent" && (
-              <motion.div key="consent" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.15 }} className="flex flex-col items-center pt-6 text-center">
+              <motion.div key="consent" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.15 }} className="flex flex-col items-center pb-1 pt-2 text-center">
                 <motion.div initial={{ scale: 0.4, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ type: "spring", stiffness: 260, damping: 13, delay: 0.05 }}>
-                  <Orb size={112} density={80} {...orbState} />
+                  <Orb size={124} density={58} centerOpacity={12} {...orbState} />
                 </motion.div>
-                <h1 className="mt-3 text-xl font-semibold tracking-tight">Want me to read your screen?</h1>
-                <p className="mt-1.5 max-w-[320px] text-sm text-muted">I'll look for the error you're seeing. It's read on this computer, once, and never saved.</p>
+                <h1 className="mt-2 text-xl font-semibold tracking-tight text-white">Want me to read your screen?</h1>
+                <p className="mt-1.5 max-w-[350px] text-sm text-white/60">
+                  I'll keep reading it until you press Stop, catch errors as they appear and check them against your team's memory. It's read on this
+                  computer and never saved.
+                </p>
                 {ide && (
                   <div className="mt-4 w-full">
                     <IdeLine ide={ide} />
                     {needsFolderConsent && <p className="mt-1 text-[11px] text-muted">I'll also ask to read the {ide.folder} folder.</p>}
                   </div>
                 )}
-                <div className="mt-6 flex w-full gap-2">
+                <div className="mt-5 flex w-full gap-2">
                   <button type="button" onClick={() => setPhase("home")} className="btn btn-secondary btn-lg flex-1">
                     Not now
                   </button>
-                  <button type="button" autoFocus onClick={() => void readScreenNow()} className="btn btn-primary btn-lg flex-1">
+                  <button type="button" autoFocus onClick={() => void startWatching()} className="btn btn-primary btn-lg flex-1">
                     <ScanSearch className="h-4 w-4" aria-hidden="true" /> Read my screen
                   </button>
                 </div>
               </motion.div>
             )}
 
-            {phase === "reading" && (
-              <motion.div key="reading" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.15 }} className="flex flex-col items-center py-7 text-center">
-                <Orb size={128} density={90} {...orbState} />
-                <p className="mt-3 text-lg font-semibold tracking-tight">Reading your screen...</p>
-                <p className="mt-1 text-sm text-muted">{ide ? `Looking at ${ide.ide}${ide.folder ? ` · ${ide.folder}` : ""}` : "Looking for the error"}</p>
-              </motion.div>
-            )}
-
-            {phase === "found" && finding && (
-              <motion.div key="found" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: 0.2 }} className="flex flex-col items-center pt-2 text-center">
-                <Orb size={84} density={60} {...orbState} />
-                <p className="mt-2 text-lg font-semibold tracking-tight">{finding.title}</p>
-                <pre className="glass-well mt-3 max-h-44 w-full overflow-auto whitespace-pre-wrap rounded-2xl p-3 text-left font-mono text-[11px] leading-[1.55] text-severity">
-                  {finding.text}
-                </pre>
-                <p className="mt-2 text-[11px] text-muted">{finding.label}</p>
-                {notice && <p className="mt-1 text-[11px] text-amber-300">{notice}</p>}
-                {error && <p className="mt-2 text-xs text-severity">{error}</p>}
-                <div className="mt-5 flex w-full gap-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setComposer(finding.text);
-                      setPhase("home");
-                    }}
-                    className="btn btn-secondary btn-lg"
-                  >
-                    <PenLine className="h-4 w-4" aria-hidden="true" /> Edit
+            {phase === "watching" && (
+              <motion.div key="watching" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.15 }} className="flex flex-col items-center pt-3 text-center">
+                <Orb size={92} density={70} {...orbState} audio={voice.audio} />
+                <p className="mt-2 text-lg font-semibold tracking-tight">
+                  {watch?.starting || !last ? "Starting..." : last.ok ? "Watching for errors" : "Screen context unavailable"}
+                </p>
+                <p className="mt-1 max-w-[340px] text-sm text-muted">
+                  {last && !last.ok
+                    ? "Attach a screenshot or paste the error below, and I'll check it against your team's memory."
+                    : "When an error appears on your screen I'll check it against your team's memory. Ask me anything about what you're looking at."}
+                </p>
+                {last && !last.ok && (
+                  <button type="button" onClick={() => fileRef.current?.click()} disabled={readingImage} className="btn btn-secondary btn-sm mt-3">
+                    <ImageUp className="h-3.5 w-3.5" aria-hidden="true" /> Attach screenshot
                   </button>
-                  <button type="button" autoFocus onClick={() => void investigate(finding.text, finding.kind)} className="btn btn-primary btn-lg flex-1">
-                    Investigate
-                  </button>
-                </div>
+                )}
+                {notice && <p className="mt-3 text-xs text-amber-300">{notice}</p>}
               </motion.div>
             )}
 
             {phase === "home" && (
               <motion.div key="home" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.15 }} className="flex flex-col items-center pt-1 text-center">
-                <Orb size={96} density={70} {...orbState} level={voice.level} />
-                <h1 className="mt-2 text-xl font-semibold tracking-tight">{voice.listening ? "Listening..." : voice.starting ? "Starting the microphone..." : "How can I help?"}</h1>
+                <Orb size={voice.listening ? 120 : 96} density={70} {...orbState} audio={voice.audio} />
+                <h1 className="mt-2 text-xl font-semibold tracking-tight">{voice.listening ? "Listening..." : voice.starting ? "Starting the microphone..." : "What are you looking at?"}</h1>
                 <p className="mt-1 max-w-[330px] text-sm text-muted">
-                  {voice.partial ? <span className="text-ink">{voice.partial}</span> : "Paste an error to investigate it, or ask what your team learned before."}
+                  {voice.partial ? <span className="text-ink">{voice.partial}</span> : "Paste the error, attach a screenshot, or ask what your team learned before."}
                 </p>
                 {notice && <p className="mt-3 text-xs text-amber-300">{notice}</p>}
+                {desktop?.watchStart && (
+                  <button type="button" onClick={() => void startWatching()} className="btn btn-secondary btn-sm mt-3">
+                    <ScanSearch className="h-3.5 w-3.5" aria-hidden="true" /> Read my screen
+                  </button>
+                )}
                 {fallback && !composer && (
                   <button
                     type="button"
@@ -659,6 +830,26 @@ export default function Overlay() {
                   </div>
                 ) : diagnosis ? (
                   <>
+                    {pendingError && (
+                      <div className="flex items-center gap-2 rounded-2xl border border-severity/25 bg-severity/[0.07] px-3 py-2 text-left">
+                        <CircleAlert className="h-4 w-4 shrink-0 text-severity" aria-hidden="true" />
+                        <span className="min-w-0 flex-1">
+                          <span className="block text-[12px] text-ink">A different error appeared on your screen</span>
+                          <span className="block truncate font-mono text-[11px] text-severity">{errorLine(pendingError.text)}</span>
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            handledError.current = pendingError.fingerprint;
+                            setPendingError(null);
+                            void investigate(pendingError.text, "screen");
+                          }}
+                          className="btn btn-secondary !px-2 !py-1 text-[11px]"
+                        >
+                          Investigate
+                        </button>
+                      </div>
+                    )}
                     <div className="flex items-center gap-3">
                       <Orb size={48} density={40} scale={90} interactive={false} {...orbState} />
                       <div className="min-w-0">
@@ -684,32 +875,6 @@ export default function Overlay() {
                     )}
                   </>
                 ) : null}
-              </motion.div>
-            )}
-
-            {phase === "answer" && answer && (
-              <motion.div key={`answer-${answer.question}`} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: 0.2 }} className="space-y-4 pt-1">
-                <div className="flex items-center gap-3">
-                  <Orb size={48} density={40} scale={90} interactive={false} {...orbState} />
-                  <div className="min-w-0">
-                    <p className="text-lg font-semibold tracking-tight text-memory">{answer.memory_unavailable ? "Memory unavailable" : "From your team's memory"}</p>
-                    <p className="truncate text-[12px] text-muted">{answer.question}</p>
-                  </div>
-                </div>
-                <div className="text-[14px] leading-6 text-ink">
-                  <MarkdownLite text={answer.answer} />
-                </div>
-                {!answer.memory_unavailable && (
-                  <p className="text-[11px] text-muted">
-                    Hindsight recalled {answer.recalled_count} memories across {answer.incidents.length} incident{answer.incidents.length === 1 ? "" : "s"} in {duration(answer.latency_ms)}.
-                  </p>
-                )}
-                {answer.incidents.length > 0 && (
-                  <div className="space-y-2">
-                    <p className="eyebrow">Past incidents</p>
-                    <PastIncidentList items={answer.incidents} cited={answerCited} />
-                  </div>
-                )}
               </motion.div>
             )}
 
@@ -787,14 +952,9 @@ export default function Overlay() {
                 </div>
                 {experience.memory_retained ? (
                   <>
-                    <p className="eyebrow !text-memory">Experience captured</p>
-                    <p className="text-xl font-semibold tracking-tight">Added to your team's memory.</p>
-                    <p className="text-sm text-muted">The next similar incident will start from what you just learned.</p>
-                    {experience.memory_count_before !== null && experience.memory_count_after !== null && (
-                      <p className="rounded-full bg-white/[0.05] px-3 py-1 font-mono text-xs text-muted">
-                        Hindsight memories {experience.memory_count_before} to <span className="text-memory">{experience.memory_count_after}</span>
-                      </p>
-                    )}
+                    <p className="eyebrow !text-success">Saved to Hindsight</p>
+                    <p className="text-xl font-semibold tracking-tight">FRIDAY learned.</p>
+                    <p className="text-sm text-muted">Your resolution is now available for future incidents.</p>
                   </>
                 ) : (
                   <>
@@ -826,20 +986,60 @@ export default function Overlay() {
                   )}
                 </div>
                 <p className="text-[11px] text-muted">
-                  Press <Kbd>{shortcut}</Kbd> on the next error to see it recalled.
+                  {watch ? "I'm still reading your screen; the next error will be checked against this." : <>Press <Kbd>{shortcut}</Kbd> on the next error to see it recalled.</>}
                 </p>
               </motion.div>
             )}
           </AnimatePresence>
-          {error && phase !== "diagnosis" && phase !== "found" && <p className="mt-3 text-center text-xs text-severity">{error}</p>}
+          {chat.length > 0 && showComposer && (
+            <div className="mt-4 space-y-4 border-t border-white/[0.06] pt-4">
+              {chat.map((turn) => (
+                <motion.div key={turn.id} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} className="space-y-2">
+                  <p className="ml-auto w-fit max-w-[85%] rounded-2xl rounded-br-md bg-white/[0.08] px-3 py-1.5 text-[13px] text-ink">{turn.question}</p>
+                  {turn.error ? (
+                    <p className="text-xs text-severity">{turn.error}</p>
+                  ) : turn.answer ? (
+                    <AssistAnswerView answer={turn.answer} compact />
+                  ) : (
+                    <p className="flex items-center gap-2 text-xs text-muted">
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+                      {watch?.last?.found ? "Reading your screen, searching memory and your project..." : "Searching memory and your project..."}
+                    </p>
+                  )}
+                </motion.div>
+              ))}
+            </div>
+          )}
+          {error && phase !== "diagnosis" && <p className="mt-3 text-center text-xs text-severity">{error}</p>}
         </div>
 
         {/* footer */}
         {showComposer && (
           <div className="shrink-0 px-4 pb-4 pt-1">
+            <input
+              ref={fileRef}
+              type="file"
+              accept="image/png,image/jpeg"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                e.target.value = "";
+                if (file) void readScreenshot(file);
+              }}
+            />
             <div
-              className={`glass-well flex items-end gap-2 rounded-[22px] p-1.5 pl-4 transition-shadow focus-within:border-memory/40 ${voice.listening ? "shadow-[0_0_0_1px_rgba(45,212,191,0.5),0_0_24px_rgba(45,212,191,0.18)]" : ""}`}
+              className={`glass-well flex items-end gap-2 rounded-[22px] p-1.5 pl-2 transition-shadow focus-within:border-memory/40 ${voice.listening ? "shadow-[0_0_0_1px_rgba(255,255,255,0.45),0_0_24px_rgba(255,255,255,0.12)]" : ""}`}
             >
+              <button
+                type="button"
+                onClick={() => fileRef.current?.click()}
+                disabled={readingImage}
+                aria-label="Read an error from a screenshot"
+                title="Read an error from a screenshot (PNG or JPEG)"
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-muted transition-colors hover:bg-white/[0.08] hover:text-ink disabled:opacity-40"
+              >
+                {readingImage ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <ImageUp className="h-4 w-4" aria-hidden="true" />}
+              </button>
               <textarea
                 ref={composerRef}
                 value={composer}
@@ -851,7 +1051,7 @@ export default function Overlay() {
                   }
                 }}
                 rows={Math.min(5, Math.max(1, composer.split("\n").length))}
-                placeholder={phase === "answer" ? "Ask a follow-up..." : "Paste an error or ask a question"}
+                placeholder={watch ? "Ask about what's on your screen..." : incident ? "Ask about this incident..." : "Paste an error or ask a question"}
                 className="bare-input max-h-32 min-h-[36px] flex-1 resize-none border-0 bg-transparent py-2 text-[14px] leading-5 text-ink outline-none placeholder:text-muted/60"
               />
               {voice.supported && (
@@ -875,9 +1075,9 @@ export default function Overlay() {
               <button
                 type="button"
                 onClick={submit}
-                disabled={!composer.trim() || (intent === "ask" && !memoryOn)}
+                disabled={!composer.trim()}
                 aria-label={intent === "investigate" ? "Investigate" : "Ask"}
-                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-memory text-[#04201d] transition-all hover:brightness-110 active:scale-95 disabled:bg-white/10 disabled:text-muted"
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-memory text-black transition-all hover:brightness-110 active:scale-95 disabled:bg-white/10 disabled:text-muted"
               >
                 <ArrowUp className="h-4 w-4" aria-hidden="true" />
               </button>
@@ -886,7 +1086,7 @@ export default function Overlay() {
               <p className="mt-2 px-1 text-[11px] text-muted">
                 {voice.error ?? (
                   <>
-                    {intent === "investigate" ? "Enter investigates this as an error" : memoryOn ? "Enter asks your team's memory" : "Turn memory on to ask past incidents"}
+                    {intent === "investigate" ? "Enter investigates this as an error" : watch?.last?.found ? "Enter asks FRIDAY, with your screen as context" : "Enter asks FRIDAY"}
                     {" · "}
                     <button type="button" onClick={() => setForced(intent === "investigate" ? "ask" : "investigate")} className="text-memory hover:underline">
                       {intent === "investigate" ? "ask instead" : "investigate instead"}
@@ -907,7 +1107,9 @@ export default function Overlay() {
               </button>
             ) : (
               <>
-                <p className="mb-2 text-center text-[12px] text-muted">After you apply a fix, how did it go?</p>
+                <p className={`mb-2 text-center text-[12px] ${errorGone ? "font-medium text-success" : "text-muted"}`}>
+                  {errorGone ? "The error is no longer on your screen. Did this fix work?" : "Did this fix work?"}
+                </p>
                 <div className="grid grid-cols-4 gap-1.5">
                   {REPORTED.map((r) => (
                     <button
@@ -943,7 +1145,7 @@ export default function Overlay() {
         {phase === "learned" && (
           <div className="flex shrink-0 gap-2 border-t border-white/[0.06] px-4 pb-4 pt-3">
             <button type="button" onClick={() => reset(activation)} className="btn btn-primary btn-lg flex-1">
-              <RotateCcw className="h-4 w-4" aria-hidden="true" /> Next incident
+              <RotateCcw className="h-4 w-4" aria-hidden="true" /> {watch ? "Keep watching" : "Next incident"}
             </button>
             {desktop && incident && (
               <button type="button" onClick={() => desktop?.openConsole(`/incidents/${incident.id}`)} className="btn btn-secondary btn-lg">

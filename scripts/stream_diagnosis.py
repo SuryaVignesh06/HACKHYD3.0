@@ -13,7 +13,7 @@ import httpx
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("demo_id", choices=["DEMO-A", "DEMO-B", "DEMO-C"])
+    parser.add_argument("demo_id", choices=["DEMO-A", "DEMO-B", "DEMO-C", "DEMO-D", "DEMO-E", "DEMO-F"])
     parser.add_argument("--memory", choices=["on", "off"], default="on")
     parser.add_argument("--follow-up", action="store_true", help="use DEMO-C's follow-up alert")
     parser.add_argument("--incident", help="diagnose an existing incident instead of creating one")

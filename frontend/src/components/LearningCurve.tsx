@@ -46,7 +46,7 @@ export default function LearningCurve({ points }: { points: LearningPoint[] }) {
               const tone = !p.memory_enabled
                 ? "border border-white/25 bg-white/[0.06]"
                 : p.strong_match
-                  ? "bg-gradient-to-t from-memory/70 to-memory shadow-[0_0_8px_rgba(20,184,166,0.3)]"
+                  ? "bg-gradient-to-t from-memory/70 to-memory shadow-[0_0_8px_rgba(255,255,255,0.20)]"
                   : "bg-gradient-to-t from-amber-400/50 to-amber-400/90";
 
               return (

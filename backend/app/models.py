@@ -456,6 +456,63 @@ class AskAnswer(BaseModel):
     latency_ms: int
 
 
+AssistIntent = Literal["cause", "location", "history", "previous_fix", "why_not", "exact_change", "general"]
+EvidenceSource = Literal["SCREEN", "INCIDENT", "PROJECT", "HINDSIGHT"]
+
+
+class AssistRequest(BaseModel):
+    """A question about what the engineer is looking at. Screen text comes from an OCR read the engineer started."""
+
+    question: str = PydanticField(min_length=2, max_length=2000)
+    screen_text: str | None = PydanticField(default=None, max_length=8000)
+    incident_id: str | None = None
+    project_id: int | None = None
+
+
+class EvidenceItem(BaseModel):
+    """One fact the answer rests on, labelled with where it came from."""
+
+    source: EvidenceSource
+    text: str
+    incident_id: str | None = None
+    location: str | None = None  # "path:line" for project facts
+
+
+class AssistDraftHistory(BaseModel):
+    incident_id: str
+    text: str
+
+
+class AssistDraft(BaseModel):
+    """What the LLM returns; every incident ID and claim is verified before it reaches the engineer."""
+
+    answer: str
+    recommendation: str | None = None
+    next_step: str | None = None
+    history: list[AssistDraftHistory] = PydanticField(default_factory=list)
+
+
+class AssistAnswer(BaseModel):
+    question: str
+    intent: AssistIntent
+    answer: str
+    recommendation: str | None
+    next_step: str | None
+    current: list[EvidenceItem]  # SCREEN, INCIDENT and PROJECT facts, read now
+    history: list[EvidenceItem]  # HINDSIGHT experiences, verified against recall
+    worked: list[FixRecord]
+    failed: list[FixRecord]
+    findings: list[CodeFinding]
+    incidents: list[PastIncident]
+    screen_used: bool
+    project: str | None
+    project_error: str | None
+    memory_unavailable: bool
+    no_match: bool  # no previous engineering experience matched
+    degraded: bool  # the language model was unavailable
+    latency_ms: int
+
+
 class ApiError(BaseModel):
     error: str
     message: str

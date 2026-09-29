@@ -1,4 +1,4 @@
-# CLAUDE.md — On-Call Copilot
+# CLAUDE.md — FRIDAY
 
 Version 2.0 is a desktop-first engineering memory agent (tagline: "Your engineering team's memory, always one shortcut away"). The desktop design, decisions and deviations are in `docs/DESKTOP_AGENT.md`; read it before changing the desktop, overlay, project access or inspect code.
 
@@ -8,7 +8,7 @@ This file tells Claude Code how to work in this repository. Read it fully before
 
 ## 1. What we are building
 
-On-Call Copilot is an incident response agent that remembers every production incident a team has handled. An engineer pastes an alert, log or stack trace. The agent recalls similar past incidents from Hindsight memory, reasons over them, and returns:
+FRIDAY (formerly On-Call Copilot; the visible product name is FRIDAY everywhere) is an engineering memory agent that remembers every production incident a team has handled. An engineer pastes an alert, log or stack trace. The agent recalls similar past incidents from Hindsight memory, reasons over them, and returns:
 
 - the likely root cause, with confidence
 - the fix to try first
@@ -320,13 +320,14 @@ The LLM cites attempts by reference (`INC-030#1`), and the backend maps each ref
   - Memory accent: teal `#14B8A6`
   - Success: green `#22C55E`
 - **Fonts:** Inter for UI, JetBrains Mono for logs, alert text and incident IDs.
-- **Layout of the Console page:**
-  - Top bar with a memory count and the Memory on/off toggle
-  - Left column: incident input (signal simulator, pasted alert, demo chips)
-  - Centre: diagnosis with a Try First card (outcome buttons: Worked, Didn't work, Note) and an Avoid card, each listing the verified incidents
-  - Under the diagnosis: the investigation timeline (parse, recall, evidence, reflect, diagnosis), each step with its detail and duration, filling in live from the stream
-  - Right column: "Why I think this": matched incidents with relevance percentage, then memory cards
-  - Bottom: learning-curve strip and "Resolve incident"
+- **Layout of the Console page (FRIDAY, user mockup 2026-09-29):**
+  - Top bar: FRIDAY wordmark, "Ask FRIDAY anywhere" shortcut pill (opens the overlay; `/` focuses the composer in a browser), Memory switch, Ready status (real Hindsight check), and the Nimbus Pay workspace menu (views and the project FRIDAY inspects)
+  - Hero: the orb (reacts to the voice while the mic is on), the FRIDAY wordmark and "Engineering memory, when you need it."
+  - Incident card: header (signature, relative time, actions menu), the five-stage rail Understand, Remember, Inspect, Recommend, Learn (each turns green only after the real step), then three cards: Team Memory (grouped worked/failed fixes with incident chips), Your Code (the inspected line), Likely Root Cause
+  - "What to do next": open the file at the line, the Try First fix, verify and record the outcome (Worked, Partly, Didn't work), Resolve and learn
+  - Details live in sheets: "Why FRIDAY thinks this" (Fix, Past incidents, Why, and the recalled memory cards with relevance and age), fix attempts, the investigation log
+  - Bottom: learning-curve strip, then the composer (screenshot, text, mic, send); an error opens an incident, a question is answered from memory
+  - Console surfaces use `.panel`, `.panel-inset` and `.code-well` from `frontend/src/index.css`
 - **Motion:** memory cards slide and fade in one by one as recall returns (Framer Motion, a stagger of 60–80 ms). Keep all motion subtle, 150–250 ms.
 - **Memory off state:** show a muted grey card labelled "Without memory".
 - **Loading:** render each streamed step as it arrives. Recall cards within 2 s; while reflect runs, the timeline shows "Hindsight is reasoning over N matching incidents" with a running timer. Never a bare spinner.
@@ -346,7 +347,9 @@ The LLM cites attempts by reference (`INC-030#1`), and the backend maps each ref
 - States: idle, context, investigating, diagnosis, resolve, learned. The first view must be understandable in 5 seconds; Known / Likely / Unknown and related incidents sit behind "Why this?".
 - Every status is a real operation: "Project inspected" only after the backend read the project; "Saved to Hindsight" only when retain succeeded. The active application line says "unavailable" rather than guessing.
 - Project access only through the native consent dialog; the backend rejects project registration without the `X-OnCall-Client: desktop` header and reads only inside registered roots.
-- The screen is captured only when the engineer clicks "Read the error from my screen". Clipboard text is used only when it looks like an error, and the overlay says it was used.
+- "Read my screen" starts a reading session only after the engineer says yes: the card docks to the bottom-right corner, a pale blue border marks the screen (a click-through window, `desktop/src/glow.ts`), and the display is read with local Windows OCR about every 2 s until the engineer presses Stop or closes the card (sessions end on their own after an hour). FRIDAY's own windows are excluded from capture, frames are deleted after each OCR call, and only the error lines leave the machine. A new error (seen in two reads in a row) is investigated automatically; when it has been gone for two reads, the card asks "Did this fix work?". Never show "Reading your screen" before a frame was actually read; if capture fails, say "FRIDAY couldn't read the current screen" and offer a screenshot or paste. Clipboard text is used only when it looks like an error, and the overlay says it was used.
+- Questions asked in the card or the console go to `POST /api/assist` (`services/assist.py`): screen or incident context, Hindsight recall and reflect, the fix log and the authorized project, then an LLM answer from that evidence only. Every fact is labelled SCREEN, INCIDENT, PROJECT or HINDSIGHT; incident IDs outside recall are scrubbed; with no citable experience the answer starts "No previous engineering experience matched this problem."
+- Do not show internal statistics (memory counts, totals) in the UI; show only what answers the current question.
 - Never execute fixes. The agent recommends; the engineer acts and records the outcome.
 
 ## 10. Data rules

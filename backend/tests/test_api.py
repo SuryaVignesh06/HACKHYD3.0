@@ -290,7 +290,8 @@ def test_unknown_incident_is_readable(client: TestClient) -> None:
 def test_stats_and_demo_alerts(client: TestClient) -> None:
     assert client.get("/api/memory/stats").json() == {"bank_id": "test-bank", "memory_count": 230,
                                                       "observation_count": 41, "available": True, "demo_tools": True}
-    assert [d["id"] for d in client.get("/api/demo-alerts").json()] == ["DEMO-A", "DEMO-B", "DEMO-C"]
+    assert [d["id"] for d in client.get("/api/demo-alerts").json()] == ["DEMO-A", "DEMO-B", "DEMO-C",
+                                                                              "DEMO-D", "DEMO-E", "DEMO-F"]
 
 
 def test_learning_loop_attempts_draft_resolve(client: TestClient) -> None:
@@ -413,3 +414,72 @@ def test_ask_with_hindsight_down_shows_nothing_recalled(client: TestClient) -> N
     body = client.post("/api/memory/ask", json={"question": "Redis pool errors?"}).json()
     assert body["memory_unavailable"] is True and body["incidents"] == [] and "unavailable" in body["answer"]
 
+
+
+SCREEN = (
+    "2026-09-29T16:16:40+05:30 ERROR payments-api worker-3 request failed: redis.exceptions.ConnectionError: Too many connections\n"
+    '  File "/app/payments/idempotency.py", line 12, in get_idempotency_key'
+)
+
+
+class AssistLLM(FakeLLM):
+    def __init__(self, fail: bool = False) -> None:
+        super().__init__(fail=fail)
+        self.prompts: list[str] = []
+
+    async def answer_question(self, prompt: str) -> tuple[Any, str]:
+        from app.models import AssistDraft, AssistDraftHistory
+
+        self.prompts.append(prompt)
+        if self.fail:
+            raise LLMUnavailable("down")
+        return AssistDraft(
+            answer="The pool is capped at 20, the same pattern as INC-037. It also looks like INC-999.",
+            recommendation="Raise REDIS_MAX_POOL from 20 to 50 in values-prod.yaml.",
+            next_step="Open deploy/helm/payments-api/values-prod.yaml",
+            history=[AssistDraftHistory(incident_id="INC-037", text="INC-037 was fixed by raising the pool to 50."),
+                     AssistDraftHistory(incident_id="INC-999", text="Invented incident.")],
+        ), "nvidia/test"
+
+
+def test_assist_grounds_the_answer_in_screen_memory_and_project(client: TestClient, demo_project: Any) -> None:
+    app.state.memory = AskMemory()
+    llm = AssistLLM()
+    app.state.llm = llm
+    project = client.post("/api/projects", json={"root_path": str(demo_project), "scope": "once"},
+                          headers={"X-OnCall-Client": "desktop"}).json()
+    body = client.post("/api/assist", json={"question": "Where should I fix this?", "screen_text": SCREEN,
+                                            "project_id": project["id"]}).json()
+    assert body["intent"] == "location" and body["screen_used"] is True and body["no_match"] is False
+    assert "INC-999" not in body["answer"] and "INC-037" in body["answer"]
+    assert [h["incident_id"] for h in body["history"]] == ["INC-037"]
+    sources = {item["source"] for item in body["current"]}
+    assert sources == {"SCREEN", "PROJECT"}
+    assert body["current"][0]["text"].startswith("redis.exceptions.ConnectionError: Too many connections")
+    pool = next(item for item in body["current"] if item["source"] == "PROJECT" and "REDIS_MAX_POOL" in item["text"])
+    assert pool["location"].startswith("deploy/helm/payments-api/values-prod.yaml:") and "= 20" in pool["text"]
+    assert any("restart" in f["action"].lower() for f in body["failed"]) and body["worked"]
+    # The model saw the evidence, labelled, and never a request to use its own knowledge.
+    assert "CURRENT CONTEXT (screen)" in llm.prompts[0] and "PROJECT FINDINGS" in llm.prompts[0]
+
+
+class NoMatchMemory(AskMemory):
+    async def recall_similar(self, alert_text: str, service: str) -> list[RecalledMemory]:
+        return [RecalledMemory(text="INC-026 alias swap", type="world", incident_id="INC-026", relevance=0.41)]
+
+
+def test_assist_says_plainly_when_history_has_nothing(client: TestClient) -> None:
+    app.state.memory = NoMatchMemory()
+    app.state.llm = AssistLLM()
+    body = client.post("/api/assist", json={"question": "Has this happened before?", "screen_text": SCREEN}).json()
+    assert body["intent"] == "history" and body["no_match"] is True
+    assert body["answer"].startswith("No previous engineering experience matched this problem.")
+    assert body["history"] == [] and body["worked"] == [] and body["failed"] == []
+
+
+def test_assist_with_memory_down_invents_nothing(client: TestClient) -> None:
+    app.state.memory = type("DownAssist", (AskMemory,), {})(fail_recall=True)
+    app.state.llm = AssistLLM(fail=True)
+    body = client.post("/api/assist", json={"question": "What is causing this?", "screen_text": SCREEN}).json()
+    assert body["memory_unavailable"] is True and body["degraded"] is True
+    assert body["answer"].startswith("FRIDAY memory is unavailable") and body["history"] == [] and body["incidents"] == []

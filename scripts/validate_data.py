@@ -124,8 +124,9 @@ def main() -> int:
         if not any("REDIS_MAX_POOL from 20 to 50" in a["action"] and a["outcome"] == "worked" for a in attempts):
             errors.append(f"{inc['id']}: needs the worked REDIS_MAX_POOL 20 to 50 fix")
 
-    if [d["id"] for d in demo_alerts] != ["DEMO-A", "DEMO-B", "DEMO-C"]:
-        errors.append("demo_alerts.json must contain exactly DEMO-A, DEMO-B, DEMO-C")
+    demo_ids = [d["id"] for d in demo_alerts]
+    if demo_ids[:3] != ["DEMO-A", "DEMO-B", "DEMO-C"] or len(set(demo_ids)) != len(demo_ids):
+        errors.append("demo_alerts.json must start with DEMO-A, DEMO-B, DEMO-C and use unique IDs")
     for demo in demo_alerts:
         at = [signal["at_ms"] for signal in demo.get("signals", [])]
         if len(at) < 3 or at != sorted(at):

@@ -77,7 +77,7 @@ def parse_alert(alert_text: str, service_hint: str | None = None, severity_hint:
 
 
 def matched_incidents(recalled: list[RecalledMemory], known: dict[str, KnownIncident],
-                      exclude_id: str | None) -> list[MatchedIncident]:
+                      exclude_id: str | None, limit: int = MAX_MATCHED) -> list[MatchedIncident]:
     """Group recalled memories by incident and keep each incident's best Hindsight relevance."""
     best: dict[str, float] = {}
     for memory in recalled:
@@ -85,7 +85,7 @@ def matched_incidents(recalled: list[RecalledMemory], known: dict[str, KnownInci
         if not iid or iid == exclude_id or iid not in known or memory.relevance is None:
             continue
         best[iid] = max(best.get(iid, 0.0), memory.relevance)
-    ranked = sorted(best.items(), key=lambda item: item[1], reverse=True)[:MAX_MATCHED]
+    ranked = sorted(best.items(), key=lambda item: item[1], reverse=True)[:limit]
     return [
         MatchedIncident(
             id=iid,
