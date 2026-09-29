@@ -4,6 +4,9 @@ Everything is computed from recorded incidents, attempts and diagnoses; the Hind
 from the bank itself. Nothing is estimated.
 """
 
+import asyncio
+import logging
+import time
 from collections import defaultdict
 from datetime import datetime
 
@@ -11,11 +14,18 @@ from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
 from sqlmodel import Session, select
 
-from app.db import from_db_time, get_session
-from app.models import AttemptRow, Diagnosis, DiagnosisRow, IncidentRow
+from app.db import from_db_time, get_session, record_event
+from app.models import AskAnswer, AskRequest, AttemptRow, Diagnosis, DiagnosisRow, IncidentRow, PastIncident
+from app.services.evidence import INCIDENT_ID, parse_alert, scrub_unverified_lines
 from app.services.memory import MemoryService, MemoryUnavailable
 
 router = APIRouter(prefix="/api")
+logger = logging.getLogger("oncall.agent")
+ASK_MAX_INCIDENTS = 6
+ASK_QUERY = ("{question}\n\nAnswer from the team's past incidents only, for an on-call engineer reading a small panel. "
+             "Start with one or two plain sentences that answer the question. Then at most four short bullet points: "
+             "what worked, what failed, and the lesson, each naming the incident IDs it relies on. No headings, no tables. "
+             "If nothing in memory matches, say so plainly.")
 
 
 class FixOutcome(BaseModel):
@@ -60,10 +70,24 @@ class MemoryTotals(BaseModel):
     hindsight_observations: int | None
 
 
+class LearnedExperience(BaseModel):
+    """An incident resolved in the app and retained as a new engineering experience."""
+
+    id: str
+    title: str
+    service: str
+    root_cause: str | None
+    fix: str | None
+    resolved_at: datetime | None
+    worked: int
+    failed: int
+
+
 class MemoryOverview(BaseModel):
     totals: MemoryTotals
     services: list[ServiceNode]
     growth: list[GrowthPoint]
+    recent_learned: list[LearnedExperience]
 
 
 def label_for(family: str) -> str:
@@ -75,6 +99,68 @@ def label_for(family: str) -> str:
 def get_memory(request: Request) -> MemoryService:
     memory: MemoryService = request.app.state.memory
     return memory
+
+
+@router.post("/memory/ask", response_model=AskAnswer)
+async def ask(body: AskRequest, session: Session = Depends(get_session),
+              memory: MemoryService = Depends(get_memory)) -> AskAnswer:
+    """Ask the team's memory a question. Recall picks the incidents; reflect answers; any incident the answer names
+    that recall did not return is scrubbed (no citation, no claim)."""
+    started = time.perf_counter()
+    question = body.question.strip()
+    parsed = parse_alert(question)
+    service = parsed.service if parsed.service != "unknown-service" else ""
+    logger.info("[RECALL] ask: %r", question[:160])
+    reflect_task = asyncio.create_task(memory.reflect_free(ASK_QUERY.format(question=question), budget="low"))
+    try:
+        recalled = await memory.recall_similar(question, service)
+    except MemoryUnavailable:
+        reflect_task.cancel()
+        record_event("recall", f"ask: {question[:120]}", False, None, None)
+        return AskAnswer(question=question, answer="Hindsight is unavailable right now, so nothing could be recalled. "
+                         "No past incidents are shown rather than guessed.", incidents=[], recalled_count=0,
+                         memory_unavailable=True, latency_ms=int((time.perf_counter() - started) * 1000))
+    record_event("recall", f"ask: {question[:120]}", True, len(recalled), None)
+
+    rows = {row.id: row for row in session.exec(select(IncidentRow)).all()}
+    best: dict[str, float | None] = {}
+    for m in recalled:
+        if m.incident_id and m.incident_id in rows:
+            current = best.get(m.incident_id)
+            best[m.incident_id] = max(current or 0.0, m.relevance or 0.0) if m.relevance is not None else current
+    try:
+        raw_answer = await reflect_task
+        record_event("reflect", f"ask: {question[:120]}", True, None, None)
+    except MemoryUnavailable:
+        raw_answer = ""
+        record_event("reflect", f"ask: {question[:120]}", False, None, None)
+    answer = scrub_unverified_lines(raw_answer, set(best))
+    if raw_answer and not answer:
+        answer = "Hindsight's answer relied on incidents that recall did not return, so it is not shown."
+    elif not raw_answer:
+        answer = "Hindsight reflect is unavailable; these are the incidents recall returned."
+
+    top = sorted(best, key=lambda iid: best[iid] or 0.0, reverse=True)[:ASK_MAX_INCIDENTS]
+    named = [iid for iid in dict.fromkeys(INCIDENT_ID.findall(answer)) if iid in best and iid not in top]
+    ids = sorted(top + named, key=lambda iid: best[iid] or 0.0, reverse=True)
+    attempts: dict[str, list[AttemptRow]] = defaultdict(list)
+    if ids:
+        for a in session.exec(select(AttemptRow).where(AttemptRow.incident_id.in_(ids)).order_by(AttemptRow.id)).all():  # type: ignore[attr-defined]
+            attempts[a.incident_id].append(a)
+    incidents = [
+        PastIncident(
+            id=iid, title=rows[iid].title, service=rows[iid].service, occurred_at=from_db_time(rows[iid].created_at),
+            relevance=round(best[iid], 4) if best[iid] is not None else None,
+            learned_live=rows[iid].source == "live" and rows[iid].status == "resolved",
+            root_cause=rows[iid].root_cause, fix=rows[iid].fix,
+            worked=[a.action for a in attempts[iid] if a.outcome == "worked"],
+            failed=[a.action for a in attempts[iid] if a.outcome == "failed"],
+        )
+        for iid in ids
+    ]
+    logger.info("[REFLECT] ask answered from %d recalled memories, %d incidents shown", len(recalled), len(incidents))
+    return AskAnswer(question=question, answer=answer, incidents=incidents, recalled_count=len(recalled),
+                     memory_unavailable=False, latency_ms=int((time.perf_counter() - started) * 1000))
 
 
 @router.get("/memory/overview", response_model=MemoryOverview)
@@ -157,4 +243,14 @@ async def overview(session: Session = Depends(get_session), memory: MemoryServic
         ),
         services=list(services.values()),
         growth=growth,
+        recent_learned=[
+            LearnedExperience(
+                id=i.id, title=i.title, service=i.service, root_cause=i.root_cause, fix=i.fix,
+                resolved_at=from_db_time(i.resolved_at),
+                worked=sum(1 for a in by_incident.get(i.id, []) if a.outcome == "worked"),
+                failed=sum(1 for a in by_incident.get(i.id, []) if a.outcome == "failed"),
+            )
+            for i in sorted((i for i in incidents if i.source == "live"), key=lambda i: i.resolved_at or i.created_at,
+                            reverse=True)[:8]
+        ],
     )

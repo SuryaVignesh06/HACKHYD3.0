@@ -6,8 +6,8 @@ export const SPLASH_HTML = `<!DOCTYPE html>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
-      background: #0B0D10;
-      color: #E5E7EB;
+      background: #000000;
+      color: #EDEDED;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
       height: 100vh;
       display: flex;
@@ -22,10 +22,15 @@ export const SPLASH_HTML = `<!DOCTYPE html>
       text-align: center;
       width: 440px;
       padding: 40px 36px;
-      border: 1px solid #1E232B;
-      border-radius: 16px;
-      background: #11141A;
-      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.6);
+      border-radius: 26px;
+      background:
+        radial-gradient(140% 90% at 0% 0%, rgba(255, 255, 255, 0.08), transparent 55%),
+        linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.015));
+      box-shadow:
+        inset 1px 1px 0 rgba(255, 255, 255, 0.22),
+        inset -1px -1px 0 rgba(255, 255, 255, 0.07),
+        inset 0 0 0 1px rgba(255, 255, 255, 0.06),
+        0 30px 80px rgba(0, 0, 0, 0.8);
       display: flex;
       flex-direction: column;
       align-items: center;

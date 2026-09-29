@@ -8,10 +8,21 @@
   #root {
     @apply h-full;
   }
+  html {
+    color-scheme: dark;
+  }
   body {
     @apply bg-bg font-sans text-ink antialiased;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11", "ss01";
+    letter-spacing: -0.006em;
+    text-rendering: optimizeLegibility;
   }
-  /* Very faint ambient light behind the glass, so the blur has something to refract. The canvas stays #101010. */
+  h1,
+  h2,
+  h3 {
+    letter-spacing: -0.02em;
+  }
+  /* Pure black canvas. Two barely-there light pools give the glass something to bend; the page still reads as black. */
   body::before {
     content: "";
     position: fixed;
@@ -19,79 +30,295 @@
     z-index: -1;
     pointer-events: none;
     background:
-      radial-gradient(900px 520px at 12% -8%, rgba(20, 184, 166, 0.07), transparent 60%),
-      radial-gradient(800px 600px at 105% 110%, rgba(119, 119, 119, 0.10), transparent 60%),
-      radial-gradient(600px 400px at 70% 30%, rgba(239, 68, 68, 0.035), transparent 60%);
+      radial-gradient(900px 520px at 10% -10%, rgba(20, 184, 166, 0.07), transparent 65%),
+      radial-gradient(800px 600px at 105% 110%, rgba(99, 102, 241, 0.05), transparent 62%);
   }
   :focus-visible {
-    @apply outline-none ring-2 ring-memory ring-offset-2 ring-offset-bg;
+    @apply outline-none ring-2 ring-memory/80 ring-offset-2 ring-offset-bg;
+  }
+  ::selection {
+    background: rgba(20, 184, 166, 0.35);
   }
 }
 
 @layer components {
-  /* Liquid glass card: translucent #777777, blurred backdrop, specular top edge, soft depth. */
+  /*
+   * Liquid glass, in the style of Apple's material: almost clear, heavily blurred and saturated, with a bright
+   * specular rim where light catches the top-left edge, a dimmer rim at the bottom-right, a lensing sheen across
+   * the top and a deep soft shadow. The rim is drawn with inset shadows so it works on fixed and absolute elements.
+   */
   .glass {
     position: relative;
-    background: linear-gradient(145deg, rgba(119, 119, 119, 0.16) 0%, rgba(119, 119, 119, 0.07) 55%, rgba(119, 119, 119, 0.11) 100%);
-    border: 1px solid rgba(255, 255, 255, 0.10);
-    border-radius: 18px;
-    backdrop-filter: blur(22px) saturate(150%);
-    -webkit-backdrop-filter: blur(22px) saturate(150%);
+    background:
+      radial-gradient(140% 90% at 0% 0%, rgba(255, 255, 255, 0.075), transparent 55%),
+      linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.018));
+    border: 0;
+    border-radius: 24px;
+    backdrop-filter: blur(28px) saturate(190%) brightness(1.05);
+    -webkit-backdrop-filter: blur(28px) saturate(190%) brightness(1.05);
     box-shadow:
-      inset 0 1px 0 rgba(255, 255, 255, 0.10),
-      inset 0 -1px 0 rgba(0, 0, 0, 0.25),
-      0 10px 40px rgba(0, 0, 0, 0.45);
+      inset 1px 1px 0 rgba(255, 255, 255, 0.22),
+      inset -1px -1px 0 rgba(255, 255, 255, 0.07),
+      inset 0 0 0 1px rgba(255, 255, 255, 0.055),
+      inset 0 0 28px rgba(255, 255, 255, 0.025),
+      0 2px 6px rgba(0, 0, 0, 0.5),
+      0 24px 60px rgba(0, 0, 0, 0.7);
   }
-  /* The liquid highlight: a soft sheen along the top edge that fades out. */
+  /* Lensing sheen: a curved highlight across the top that fades into the glass. */
   .glass::before {
     content: "";
     position: absolute;
     inset: 0;
     border-radius: inherit;
     pointer-events: none;
-    background: linear-gradient(180deg, rgba(255, 255, 255, 0.07) 0%, rgba(255, 255, 255, 0) 38%);
+    background:
+      radial-gradient(120% 55% at 50% -18%, rgba(255, 255, 255, 0.11), transparent 62%),
+      linear-gradient(180deg, rgba(255, 255, 255, 0.05) 0%, transparent 22%);
   }
   .glass > * {
     position: relative;
   }
-  /* Denser glass for surfaces that float above everything (overlay, drawers, toasts). */
+  /* Floating glass (overlay card, drawers, toasts): a touch more tint so text stays crisp over anything. */
   .glass-strong {
-    background: linear-gradient(145deg, rgba(40, 40, 40, 0.86), rgba(22, 22, 22, 0.90));
-    border: 1px solid rgba(255, 255, 255, 0.12);
-    backdrop-filter: blur(28px) saturate(160%);
-    -webkit-backdrop-filter: blur(28px) saturate(160%);
+    background:
+      radial-gradient(140% 80% at 0% 0%, rgba(255, 255, 255, 0.09), transparent 55%),
+      linear-gradient(180deg, rgba(28, 28, 30, 0.62), rgba(10, 10, 11, 0.72));
+    border: 0;
+    backdrop-filter: blur(40px) saturate(200%) brightness(1.08);
+    -webkit-backdrop-filter: blur(40px) saturate(200%) brightness(1.08);
     box-shadow:
-      inset 0 1px 0 rgba(255, 255, 255, 0.12),
-      0 24px 70px rgba(0, 0, 0, 0.6);
+      inset 1px 1px 0 rgba(255, 255, 255, 0.28),
+      inset -1px -1px 0 rgba(255, 255, 255, 0.09),
+      inset 0 0 0 1px rgba(255, 255, 255, 0.07),
+      inset 0 0 36px rgba(255, 255, 255, 0.03),
+      0 2px 8px rgba(0, 0, 0, 0.55),
+      0 40px 100px rgba(0, 0, 0, 0.8);
   }
   /* Recessed fields inside glass: inputs, code, logs. */
   .glass-well {
-    background: rgba(0, 0, 0, 0.35);
+    background: rgba(255, 255, 255, 0.03);
     border: 1px solid rgba(255, 255, 255, 0.07);
-    box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.4);
+    box-shadow:
+      inset 0 1px 3px rgba(0, 0, 0, 0.6),
+      inset 0 -1px 0 rgba(255, 255, 255, 0.04);
   }
-  /* Top bar: a thin glass strip. */
+  /* Top bar: a thin sheet of glass over black. */
   .glass-bar {
-    background: rgba(16, 16, 16, 0.72);
+    background: rgba(0, 0, 0, 0.55);
     border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-    backdrop-filter: blur(20px) saturate(150%);
-    -webkit-backdrop-filter: blur(20px) saturate(150%);
+    box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.03);
+    backdrop-filter: blur(28px) saturate(190%);
+    -webkit-backdrop-filter: blur(28px) saturate(190%);
   }
+
+  /* A quiet grouped-section heading, as in system settings panes. */
+  .eyebrow {
+    @apply text-[11px] font-semibold uppercase tracking-[0.07em] text-muted;
+  }
+
+  /* Tinted inset groups inside a card. */
+  .tile {
+    @apply rounded-2xl border border-white/[0.06] bg-white/[0.03] p-4;
+    box-shadow: inset 1px 1px 0 rgba(255, 255, 255, 0.07);
+  }
+  .tile-memory {
+    @apply rounded-2xl border border-memory/25 bg-memory/[0.06] p-4;
+  }
+  .tile-success {
+    @apply rounded-2xl border border-success/25 bg-success/[0.06] p-4;
+  }
+  .tile-severity {
+    @apply rounded-2xl border border-severity/25 bg-severity/[0.06] p-4;
+  }
+  .tile-amber {
+    @apply rounded-2xl border border-amber-400/25 bg-amber-400/[0.06] p-4;
+  }
+
+  /* Buttons: pill shaped, tactile, with a gentle press. */
+  .btn {
+    @apply inline-flex select-none items-center justify-center gap-1.5 whitespace-nowrap rounded-full px-3.5 py-1.5 text-[13px] font-medium transition-all duration-150 active:scale-[0.97] disabled:pointer-events-none disabled:opacity-40;
+  }
+  .btn-lg {
+    @apply px-5 py-2.5 text-sm;
+  }
+  .btn-sm {
+    @apply px-2.5 py-1 text-xs;
+  }
+  /* Tinted liquid glass: the teal shows through a glossy lens with a bright upper rim. */
+  .btn-primary {
+    @apply text-[#021a17];
+    background:
+      radial-gradient(120% 90% at 50% -30%, rgba(255, 255, 255, 0.55), transparent 55%),
+      linear-gradient(180deg, #34e3cc 0%, #14b8a6 100%);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.6),
+      inset 0 -1px 0 rgba(0, 0, 0, 0.15),
+      0 1px 2px rgba(0, 0, 0, 0.5),
+      0 8px 24px rgba(20, 184, 166, 0.3);
+  }
+  .btn-primary:hover {
+    filter: brightness(1.07);
+  }
+  /* Clear liquid glass button. */
+  .btn-secondary {
+    @apply text-ink;
+    background:
+      radial-gradient(120% 100% at 50% -40%, rgba(255, 255, 255, 0.16), transparent 60%),
+      rgba(255, 255, 255, 0.06);
+    backdrop-filter: blur(16px) saturate(180%);
+    -webkit-backdrop-filter: blur(16px) saturate(180%);
+    box-shadow:
+      inset 1px 1px 0 rgba(255, 255, 255, 0.24),
+      inset -1px -1px 0 rgba(255, 255, 255, 0.06),
+      inset 0 0 0 1px rgba(255, 255, 255, 0.07),
+      0 4px 14px rgba(0, 0, 0, 0.45);
+  }
+  .btn-secondary:hover {
+    background:
+      radial-gradient(120% 100% at 50% -40%, rgba(255, 255, 255, 0.2), transparent 60%),
+      rgba(255, 255, 255, 0.1);
+  }
+  .btn-ghost {
+    @apply text-muted hover:bg-white/[0.06] hover:text-ink;
+  }
+  .btn-success {
+    @apply border border-success/30 bg-success/10 text-success hover:bg-success/[0.16];
+  }
+  .btn-danger {
+    @apply border border-severity/30 bg-severity/10 text-severity hover:bg-severity/[0.16];
+  }
+  .btn-amber {
+    @apply border border-amber-400/30 bg-amber-400/10 text-amber-300 hover:bg-amber-400/[0.16];
+  }
+
+  /* Segmented control (navigation, mode switches). */
+  .segmented {
+    @apply inline-flex items-center gap-0.5 rounded-full p-[3px];
+    background: rgba(255, 255, 255, 0.04);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    box-shadow:
+      inset 0 1px 3px rgba(0, 0, 0, 0.6),
+      inset 0 0 0 1px rgba(255, 255, 255, 0.07);
+  }
+  .segment {
+    @apply relative flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium text-muted transition-colors duration-150 hover:text-ink;
+  }
+  /* The selected segment is a small droplet of glass. */
+  .segment-active {
+    @apply text-ink;
+    background:
+      radial-gradient(120% 100% at 50% -30%, rgba(255, 255, 255, 0.22), transparent 60%),
+      rgba(255, 255, 255, 0.1);
+    box-shadow:
+      inset 1px 1px 0 rgba(255, 255, 255, 0.3),
+      inset -1px -1px 0 rgba(255, 255, 255, 0.08),
+      0 2px 8px rgba(0, 0, 0, 0.5);
+  }
+
+  .field {
+    @apply glass-well w-full rounded-xl px-3 py-2 text-sm text-ink placeholder:text-muted/60 transition-colors focus:border-memory/40;
+  }
+
+  select option {
+    background-color: #16181d;
+    color: #f1f5f9;
+  }
+}
+
+/* A text area that sits inside a styled container (the overlay composer) shows focus on the container instead. */
+.bare-input:focus-visible {
+  box-shadow: none;
+  --tw-ring-shadow: 0 0 #0000;
+  --tw-ring-offset-shadow: 0 0 #0000;
+  outline: none;
+}
+
+/* "Reading your screen": colour waves travelling around all four edges of the display. */
+@property --glow-angle {
+  syntax: "<angle>";
+  initial-value: 0deg;
+  inherits: false;
+}
+.screen-glow {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+}
+/* Each ring is masked to the display edge; the blur sits on the parent so the masked edge stays soft. */
+.screen-glow > span {
+  position: absolute;
+  inset: 0;
+  filter: blur(var(--glow-blur, 0px));
+  opacity: var(--glow-opacity, 1);
+}
+.screen-glow > span::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  padding: var(--glow-width, 3px);
+  background: conic-gradient(from var(--glow-angle), #14b8a6, #22d3ee, #3b82f6, #8b5cf6, #ec4899, #f59e0b, #14b8a6);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  animation: glow-spin 2.6s linear infinite;
+}
+.screen-glow > span:nth-child(1) {
+  --glow-width: 3px;
+}
+.screen-glow > span:nth-child(2) {
+  --glow-width: 12px;
+  --glow-blur: 12px;
+  animation: glow-breathe 1.8s ease-in-out infinite;
+}
+.screen-glow > span:nth-child(3) {
+  --glow-width: 40px;
+  --glow-blur: 40px;
+  --glow-opacity: 0.55;
+}
+.screen-glow > span:nth-child(3)::before {
+  animation-direction: reverse;
+  animation-duration: 3.6s;
+}
+@keyframes glow-spin {
+  to {
+    --glow-angle: 360deg;
+  }
+}
+@keyframes glow-breathe {
+  50% {
+    opacity: 0.5;
+  }
+}
+
+li:last-child > .step-line {
+  display: none;
 }
 
 /* Thin dark scrollbars so native white bars never break the console look (Windows and the desktop overlay). */
 * {
   scrollbar-width: thin;
-  scrollbar-color: #3a3a3a transparent;
+  scrollbar-color: #2a2a2a transparent;
 }
 *::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
 *::-webkit-scrollbar-thumb {
-  background: #3a3a3a;
+  background: #2a2a2a;
   border-radius: 8px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
 }
 *::-webkit-scrollbar-track {
   background: transparent;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
 }

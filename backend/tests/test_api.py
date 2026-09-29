@@ -181,12 +181,96 @@ def test_memory_off_has_no_incident_ids(client: TestClient) -> None:
     assert "INC-" not in json.dumps(diagnosis)
 
 
-def test_memory_unavailable_is_a_readable_event(client: TestClient) -> None:
+def test_memory_unavailable_falls_back_to_context_only(client: TestClient) -> None:
     app.state.memory = FakeMemory(fail_recall=True)
     incident_id = create(client)
     stream = events(client.post(f"/api/incidents/{incident_id}/diagnose"))
-    assert stream[-1] == {"type": "error", "error": "memory_unavailable",
-                          "message": "Memory is unavailable (recall failed). Try again in a moment."}
+    recall = next(e for e in stream if e["type"] == "step" and e["step"]["name"] == "recall")
+    assert recall["data"] == {"matched": [], "recalled": [], "unavailable": True}
+    assert "Hindsight unavailable" in recall["step"]["detail"]
+    diagnosis = stream[-1]["diagnosis"]
+    # Nothing is presented as recalled: no matches, no citations, no incident IDs at all.
+    assert diagnosis["memory_unavailable"] is True and diagnosis["memory_enabled"] is False
+    assert diagnosis["matched"] == [] and diagnosis["cited_incidents"] == [] and diagnosis["worked_fixes"] == []
+    assert "INC-" not in json.dumps({k: v for k, v in diagnosis.items() if k != "steps"})
+
+
+def test_diagnosis_separates_worked_and_failed_fixes(client: TestClient) -> None:
+    incident_id = create(client)
+    stream = events(client.post(f"/api/incidents/{incident_id}/diagnose"))
+    evidence = next(e for e in stream if e["type"] == "step" and e["step"]["name"] == "evidence")
+    diagnosis = stream[-1]["diagnosis"]
+    for data in (evidence["data"], diagnosis):
+        assert {r["outcome"] for r in data["worked_fixes"]} == {"worked"}
+        assert {r["outcome"] for r in data["failed_fixes"]} == {"failed"}
+        assert {r["incident_id"] for r in data["failed_fixes"]} == {"INC-037", "INC-030", "INC-003"}
+    # Every record is a real attempt of that incident in the fix log.
+    for record in diagnosis["worked_fixes"] + diagnosis["failed_fixes"]:
+        attempts = client.get(f"/api/incidents/{record['incident_id']}").json()["attempts"]
+        assert any(a["action"] == record["action"] and a["outcome"] == record["outcome"] for a in attempts)
+
+
+def test_no_precedent_hides_fix_history_claims(client: TestClient) -> None:
+    app.state.llm = FakeLLM(precedent=False)
+    incident_id = create(client)
+    diagnosis = events(client.post(f"/api/incidents/{incident_id}/diagnose"))[-1]["diagnosis"]
+    assert diagnosis["worked_fixes"] == [] and diagnosis["failed_fixes"] == []
+
+
+def test_resolved_incident_is_recalled_as_learned_live(client: TestClient) -> None:
+    first = create(client)
+    client.post(f"/api/incidents/{first}/resolve", json={"summary": "Pool exhausted", "root_cause": "Pool too small",
+                                                         "fix": "Raised REDIS_MAX_POOL from 20 to 50"})
+
+    class RecallsLearned(FakeMemory):
+        async def recall_similar(self, alert_text: str, service: str) -> list[RecalledMemory]:
+            return [RecalledMemory(text=f"{first} Redis pool", type="experience", incident_id=first, relevance=0.97),
+                    *await super().recall_similar(alert_text, service)]
+
+    app.state.memory = RecallsLearned()
+    second = create(client)
+    matched = events(client.post(f"/api/incidents/{second}/diagnose"))[-1]["diagnosis"]["matched"]
+    assert matched[0] == {**matched[0], "id": first, "learned_live": True}
+    assert all(m["learned_live"] is False for m in matched[1:])
+
+
+class FakeSeedMemory:
+    bank_id = "test-bank"
+    stored = {f"INC-{n:03d}" for n in range(1, 41)}
+    batches: list[list[str]] = []
+
+    def __init__(self, timeout: float = 30.0) -> None:
+        pass
+
+    async def ensure_bank(self) -> None:
+        return None
+
+    async def document_ids(self) -> set[str]:
+        return set(self.stored)
+
+    async def retain_postmortem_batch(self, items: list[dict[str, Any]]) -> int:
+        ids = [item["document_id"] for item in items]
+        FakeSeedMemory.batches.append(ids)
+        FakeSeedMemory.stored |= set(ids)
+        return len(items)
+
+    async def close(self) -> None:
+        return None
+
+
+def test_seed_only_adds_missing_incidents(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("app.routers.demo.MemoryService", FakeSeedMemory)
+    first = client.post("/api/memory/seed").json()
+    assert first["status"] == "success" and first["created"] == 5 and first["skipped"] == 40
+    assert [i for batch in FakeSeedMemory.batches for i in batch] == [f"INC-{n:03d}" for n in range(41, 46)]
+    again = client.post("/api/memory/seed").json()
+    assert again == {**again, "status": "already_seeded", "created": 0, "skipped": 45, "bank": "test-bank"}
+
+
+def test_demo_tools_can_be_disabled(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("app.routers.demo.get_settings", lambda: type("S", (), {"DEMO_TOOLS": False})())
+    assert client.post("/api/memory/seed").status_code == 403
+    assert client.post("/api/demo/reset", json={"confirm": "reset"}).json()["error"] == "demo_tools_disabled"
 
 
 def test_llm_failure_degrades_to_reflect_text(client: TestClient) -> None:
@@ -205,7 +289,7 @@ def test_unknown_incident_is_readable(client: TestClient) -> None:
 
 def test_stats_and_demo_alerts(client: TestClient) -> None:
     assert client.get("/api/memory/stats").json() == {"bank_id": "test-bank", "memory_count": 230,
-                                                      "observation_count": 41, "available": True}
+                                                      "observation_count": 41, "available": True, "demo_tools": True}
     assert [d["id"] for d in client.get("/api/demo-alerts").json()] == ["DEMO-A", "DEMO-B", "DEMO-C"]
 
 
@@ -294,6 +378,7 @@ def test_memory_overview_is_built_from_real_records(client: TestClient) -> None:
     assert {"INC-003", "INC-014", "INC-030", "INC-037"} <= set(redis["incident_ids"])
     assert sum(1 for f in redis["failed"] if "restart" in f["action"].lower()) == 4
     assert [p["incidents_learned"] for p in body["growth"]] == sorted(p["incidents_learned"] for p in body["growth"])
+    assert all(e["id"] not in {f"INC-{n:03d}" for n in range(1, 46)} for e in body["recent_learned"])
 
 
 def test_screen_endpoint_rejects_non_images(client: TestClient) -> None:
@@ -304,3 +389,27 @@ def test_screen_endpoint_rejects_non_images(client: TestClient) -> None:
 def test_invalid_request_is_readable(client: TestClient) -> None:
     body = client.post("/api/incidents", json={"alert_text": "short"}).json()
     assert body["error"] == "invalid_request"
+
+
+class AskMemory(FakeMemory):
+    async def reflect_free(self, query: str, budget: str = "mid") -> str:
+        return ("Redis pool exhaustion happened in INC-037 and INC-030; restarting pods failed both times. "
+                "It also resembles INC-999, which recall never returned.")
+
+
+def test_ask_answers_from_recalled_incidents_only(client: TestClient) -> None:
+    app.state.memory = AskMemory()
+    body = client.post("/api/memory/ask", json={"question": "Have we seen Redis pool exhaustion before?"}).json()
+    assert body["memory_unavailable"] is False and body["recalled_count"] == 3
+    assert "INC-037" in body["answer"] and "INC-999" not in body["answer"]
+    assert [i["id"] for i in body["incidents"]] == ["INC-037", "INC-030", "INC-003"]
+    inc037 = body["incidents"][0]
+    assert inc037["relevance"] == 0.96 and inc037["title"]
+    assert any("restart" in f.lower() for f in inc037["failed"]) and inc037["worked"]
+
+
+def test_ask_with_hindsight_down_shows_nothing_recalled(client: TestClient) -> None:
+    app.state.memory = type("DownAsk", (AskMemory,), {})(fail_recall=True)
+    body = client.post("/api/memory/ask", json={"question": "Redis pool errors?"}).json()
+    assert body["memory_unavailable"] is True and body["incidents"] == [] and "unavailable" in body["answer"]
+

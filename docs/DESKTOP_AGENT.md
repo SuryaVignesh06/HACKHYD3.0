@@ -65,3 +65,30 @@ shortcut -> overlay opens immediately
 | F | Screen reading (vision endpoint and overlay button), Memory page with growth chart and Hindsight activity log, system status and Reset demo are done. The vision path has not been run live, to save free-tier requests. Conversation capture into a structured experience is not built yet. |
 
 Known limits: active-window detection is Windows-only; git context is empty for the demo folder because the repository has no commits yet; "Open file" at a line needs the VS Code `code` command on PATH (present on the dev machine).
+
+## 6. UI and memory upgrade (2026-09-29)
+
+- Redesigned visual system (refined glass, pill buttons, segmented controls, iOS switch) within the section 9 palette and glass classes.
+- Diagnosis sections shared by console and overlay (`frontend/src/components/DiagnosisSections.tsx`): Recall, Reflect, Retain lifecycle rail; "I remember this resolution" (only when a cited precedent has `learned_live`); Hindsight memory with successful fixes and failed approaches (`worked_fixes`, `failed_fixes`, from the attempts of recalled incidents at relevance 0.75 or more, and only citable ones once verified); Evidence with a source on every item; What to do next (open file, line, current value read from disk against the historical successful value, apply, verify).
+- Resolve and learn in the overlay: Fix worked, Partially worked, Fix failed, Reverted (stored as a failed attempt with the note "Applied, then reverted."), plus outcome notes; worked or partial continues to a reviewable experience before retain.
+- Hindsight down: context-only fallback with `memory_unavailable`, never a fabricated recall.
+- Idempotent `POST /api/memory/seed`, `DEMO_TOOLS` flag, tagged `oncall.agent` logs, recently learned experiences on the Memory page.
+- Kept deviation: the demo project stays Python and Helm (`REDIS_MAX_POOL`), not `redis/connectionPool.ts`, and the Redis precedents stay INC-030 and INC-037 (no INC-042 or INC-051 references), per section 3.
+
+## 7. Overlay UX redesign (2026-09-29, later)
+
+- Opening: the card pops in with a spring ("bubble") from the top-right corner on every shortcut press and plays a short close animation before the window hides (the main process sends `copilot:dismiss` instead of hiding immediately).
+- Home: the orb (`frontend/src/components/Orb.tsx`, adapted from the user-supplied Plasma Ring WebGL component, using framer-motion instead of `motion/react`), a greeting, one card for an error found in the clipboard, project logs or screen, example questions, and one composer. Text that looks like an error is investigated; anything else is asked of team memory. A link switches the choice.
+- Ask: `POST /api/memory/ask` runs Hindsight recall and reflect together. Every incident the answer names must be one that recall returned (`scrub_unverified_lines`), and each listed incident shows its recorded worked and failed fixes.
+- Results: a short headline and summary, then three tabs (Fix, Past incidents, Why) instead of one long scroll. The console uses the same tabs.
+- Outcome: one row of buttons (Worked, Partly, Didn't work, Reverted) opens a bottom sheet; worked or partly continues to a reviewable experience before retain.
+- An open incident survives pressing the shortcut again, so the engineer can switch to the editor, apply the fix and come back to record the outcome. "New" starts over.
+- Mic: Windows' offline System.Speech dictation in the main process (`desktop/src/voice.ts`), only while the mic button is on. The transcript goes into the composer for editing; the live microphone level drives the orb. In a plain browser the Web Speech API is used when available; otherwise the button is hidden. Cloud transcription through OpenRouter was tested and rejected: audio input needs a paid balance (402), and the other free audio models are gated (403).
+
+## 8. Fullscreen blur, screen reading and IDE detection (2026-09-29, latest)
+
+- The overlay window now covers the display with Windows 11 acrylic (`backgroundMaterial: "acrylic"`, opaque window: a transparent one only shows flat grey) plus a dark tint, and the card is centered and smaller (420 px, 500 px for results). It fades in and out at the window level; clicking outside the card or Escape closes it.
+- First screen: "Want me to read your screen?" with the IDE, folder and file detected from the foreground window. Yes runs the native folder consent dialog when the detected folder is not authorized yet, then reads the screen while colour waves run around the four display edges.
+- Screen reading (`desktop/src/screenRead.ts`): one `desktopCapturer` capture with the overlay excluded through `setContentProtection(true)` for about 200 ms (verified: the overlay's text never appears in the reading, and it is visible to screen recorders the rest of the time), then Windows' built-in OCR (`Windows.Media.Ocr`, offline), then the error lines are extracted and OCR token splits are repaired. The image is deleted immediately. Measured 2.1 s end to end. The cloud vision models were dropped from this path: in testing the free ones were overloaded (502) or rate limited (429).
+- IDE detection (`desktop/src/ide.ts`): VS Code family (VS Code, Cursor, Windsurf, Antigravity, VSCodium, Trae, Kiro, Void) via `User/workspaceStorage/*/workspace.json`, JetBrains via `options/recentProjects.xml`; the folder name from the title is matched to a recorded folder, most recently used first. Nothing inside the folder is read before consent.
+- If the screen shows no error, the overlay offers recent project log errors or the clipboard, otherwise the composer.

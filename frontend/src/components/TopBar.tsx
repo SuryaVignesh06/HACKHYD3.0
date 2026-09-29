@@ -1,36 +1,22 @@
 import { useEffect, useState } from "react";
-import { Brain, Cpu, FolderOpen, FolderPlus, History, Keyboard, Layers, LayoutDashboard, Network, Siren } from "lucide-react";
+import { Brain, FolderOpen, FolderPlus, History, Layers, LayoutDashboard, Network, Siren } from "lucide-react";
 import { NavLink } from "react-router-dom";
 import type { SystemState } from "../App";
 import { API_BASE } from "../lib/api";
 import { desktop, shortcutLabel } from "../lib/desktop";
-
-function MemoryToggle({ on, onChange }: { on: boolean; onChange: (value: boolean) => void }) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={on}
-      onClick={() => onChange(!on)}
-      className="flex items-center gap-2 rounded-md px-2 py-1 text-xs text-muted hover:bg-bg"
-    >
-      <span className={on ? "text-memory" : "text-muted"}>Memory</span>
-      <span className={`relative inline-block h-5 w-9 shrink-0 rounded-full transition-colors duration-200 ${on ? "bg-memory" : "bg-border"}`}>
-        <span
-          className={`absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform duration-200 ${on ? "translate-x-4" : "translate-x-0"}`}
-        />
-      </span>
-      <span className={`w-6 font-mono ${on ? "text-memory" : "text-muted"}`}>{on ? "ON" : "OFF"}</span>
-    </button>
-  );
-}
+import { Kbd, Switch } from "./ui";
 
 function Dot({ tone }: { tone: "ok" | "warn" | "down" | "idle" }) {
   const color = { ok: "bg-success", warn: "bg-amber-400", down: "bg-severity", idle: "bg-muted" }[tone];
-  return <span className={`inline-block h-1.5 w-1.5 rounded-full ${color}`} aria-hidden="true" />;
+  return (
+    <span className="relative inline-flex h-2 w-2" aria-hidden="true">
+      {tone === "ok" && <span className={`absolute inline-flex h-full w-full animate-ping rounded-full opacity-30 ${color}`} style={{ animationDuration: "2.4s" }} />}
+      <span className={`relative inline-flex h-2 w-2 rounded-full ${color}`} />
+    </span>
+  );
 }
 
-/** Agent, Hindsight and project status, each reflecting a real check. Details show in development builds. */
+/** Hindsight and project status, each reflecting a real check. */
 function SystemStatus({ system, onConnectProject }: { system: SystemState; onConnectProject: (() => void) | null }) {
   const { backend, stats, projects } = system;
   const project = projects[projects.length - 1];
@@ -49,61 +35,53 @@ function SystemStatus({ system, onConnectProject }: { system: SystemState; onCon
     }
   }, []);
 
+  const pill = "flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border border-white/[0.08] bg-white/[0.035] px-2.5 py-1 text-xs text-muted transition-colors";
+
   return (
-    <div className="flex items-center gap-3 text-xs">
-      <span className="flex items-center gap-1.5 text-muted" title={dev ? `Backend: ${API_BASE}` : undefined}>
-        <Cpu className="h-3.5 w-3.5" aria-hidden="true" />
-        <Dot tone={backend === "ok" ? "ok" : backend === "checking" ? "idle" : "down"} />
-        {backend === "ok" ? "Agent ready" : backend === "checking" ? "Connecting..." : dev ? `Backend down (${API_BASE})` : "Agent unavailable"}
-      </span>
-      <span className="flex items-center gap-1.5 text-muted" title="Memories stored in the Hindsight bank">
+    <div className="flex items-center gap-2">
+      <span className={pill} title={dev ? `Backend: ${API_BASE}` : undefined}>
         <Brain className={`h-3.5 w-3.5 ${stats?.available ? "text-memory" : ""}`} aria-hidden="true" />
-        <Dot tone={!stats ? "idle" : stats.available ? "ok" : "warn"} />
-        {!stats ? (
-          "Hindsight"
+        <Dot tone={backend === "down" ? "down" : !stats ? "idle" : stats.available ? "ok" : "warn"} />
+        {backend === "down" ? (
+          "Agent offline"
+        ) : !stats ? (
+          "Connecting"
         ) : stats.available ? (
           <span>
-            <span className="font-mono text-ink">{stats.memory_count}</span> memories
+            <span className="font-mono font-medium text-ink">{stats.memory_count}</span> <span className="hidden xl:inline">memories</span>
             {stats.observation_count !== null && (
-              <>
-                {" "}· <span className="font-mono text-ink">{stats.observation_count}</span> observations
-              </>
+              <span className="hidden 2xl:inline">
+                {" "}· <span className="font-mono text-ink">{stats.observation_count}</span> obs
+              </span>
             )}
           </span>
         ) : (
-          "Memory unavailable, degraded mode"
+          "Memory offline"
         )}
       </span>
-      {onConnectProject &&
-        (project ? (
-          <button type="button" onClick={onConnectProject} className="flex items-center gap-1.5 text-muted hover:text-ink" title={project.root_path}>
-            <FolderOpen className="h-3.5 w-3.5" aria-hidden="true" />
-            <Dot tone="ok" />
-            {project.name}
-          </button>
-        ) : (
-          <button type="button" onClick={onConnectProject} className="flex items-center gap-1.5 text-muted hover:text-ink">
-            <FolderPlus className="h-3.5 w-3.5" aria-hidden="true" /> Connect project
-          </button>
-        ))}
+
+      {onConnectProject && (
+        <button type="button" onClick={onConnectProject} className={`${pill} hover:border-white/[0.15] hover:text-ink cursor-pointer`} title={project?.root_path}>
+          {project ? <FolderOpen className="h-3.5 w-3.5 text-memory" aria-hidden="true" /> : <FolderPlus className="h-3.5 w-3.5" aria-hidden="true" />}
+          <span className="max-w-[110px] truncate font-mono text-[11px] text-ink">{project ? project.name : "Connect project"}</span>
+        </button>
+      )}
+
       {desktop && (
         <button
           type="button"
           onClick={() => desktop?.toggleOverlay?.()}
-          className="flex items-center gap-1.5 rounded border border-border px-2 py-0.5 font-mono text-[10px] text-muted hover:border-accent hover:text-ink transition-colors cursor-pointer"
+          className={`${pill} hover:border-memory/40 hover:text-ink cursor-pointer`}
           title={
             shortcutState.registered
-              ? `Press ${shortcutLabel(shortcutState.shortcut)} anywhere to toggle overlay, or click here to open`
-              : "Click here to open the Copilot overlay"
+              ? `Press ${shortcutLabel(shortcutState.shortcut)} anywhere to open the overlay, or click here`
+              : "Shortcut taken by another app; click here to open overlay directly"
           }
         >
-          <Keyboard className="h-3 w-3" aria-hidden="true" />
-          <span>{shortcutLabel(shortcutState.shortcut)}</span>
-          {shortcutState.registered ? (
-            <span className="text-emerald-400 font-sans text-[9px] bg-emerald-500/10 px-1 py-0.2 rounded">active</span>
-          ) : (
-            <span className="text-amber-400 font-sans text-[9px] bg-amber-500/10 px-1 py-0.2 rounded">click to open</span>
-          )}
+          <Kbd>{shortcutLabel(shortcutState.shortcut)}</Kbd>
+          <span className={`text-[10px] font-medium ${shortcutState.registered ? "text-success" : "text-amber-300"}`}>
+            {shortcutState.registered ? "ready" : "click to open"}
+          </span>
         </button>
       )}
     </div>
@@ -117,16 +95,23 @@ export default function TopBar({ system, memoryOn, onMemoryChange, showToggle, o
   showToggle: boolean;
   onConnectProject: (() => void) | null;
 }) {
-  const link = ({ isActive }: { isActive: boolean }) =>
-    `flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs transition-colors duration-150 ${isActive ? "bg-white/10 text-ink shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]" : "text-muted hover:bg-white/5 hover:text-ink"}`;
+  const link = ({ isActive }: { isActive: boolean }) => `segment ${isActive ? "segment-active" : ""}`;
+
   return (
-    <header className="glass-bar relative z-10 flex h-14 shrink-0 items-center gap-4 px-5">
-      <div className="flex items-center gap-2.5">
-        <Siren className="h-5 w-5 text-severity" aria-hidden="true" />
-        <span className="text-sm font-semibold tracking-tight">On-Call Copilot</span>
-        <span className="hidden font-mono text-xs text-muted xl:inline">{system.stats?.bank_id ?? "nimbus-oncall"}</span>
+    <header className="glass-bar relative z-20 flex h-[60px] shrink-0 items-center justify-between gap-3 px-5">
+      {/* Brand / Title */}
+      <div className="flex shrink-0 items-center gap-2.5">
+        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] bg-gradient-to-br from-severity/90 to-severity/60 shadow-[inset_0_1px_0_rgba(255,255,255,0.3),0_4px_14px_rgba(239,68,68,0.3)]">
+          <Siren className="h-4 w-4 text-white" aria-hidden="true" />
+        </span>
+        <div className="min-w-0 leading-tight">
+          <p className="text-sm font-semibold tracking-tight text-ink">On-Call Copilot</p>
+          <p className="truncate font-mono text-[10px] text-muted">{system.stats?.bank_id ?? "nimbus-oncall"}</p>
+        </div>
       </div>
-      <nav className="flex items-center gap-1">
+
+      {/* Navigation Tabs (Centered) */}
+      <nav className="segmented mx-2 shrink-0" aria-label="Main">
         <NavLink to="/" end className={link}>
           <LayoutDashboard className="h-3.5 w-3.5" aria-hidden="true" /> Console
         </NavLink>
@@ -140,9 +125,16 @@ export default function TopBar({ system, memoryOn, onMemoryChange, showToggle, o
           <Network className="h-3.5 w-3.5" aria-hidden="true" /> Memory
         </NavLink>
       </nav>
-      <div className="ml-auto flex items-center gap-4">
+
+      {/* Status Badges & Memory Toggle */}
+      <div className="flex shrink-0 items-center gap-2">
         <SystemStatus system={system} onConnectProject={onConnectProject} />
-        {showToggle && <MemoryToggle on={memoryOn} onChange={onMemoryChange} />}
+        {showToggle && (
+          <label className="flex shrink-0 items-center gap-2 whitespace-nowrap rounded-full border border-white/[0.08] bg-white/[0.035] py-1 pl-3 pr-1 text-xs">
+            <span className={memoryOn ? "text-memory font-medium" : "text-muted"}>Memory</span>
+            <Switch on={memoryOn} onChange={onMemoryChange} label="Use Hindsight memory" />
+          </label>
+        )}
       </div>
     </header>
   );

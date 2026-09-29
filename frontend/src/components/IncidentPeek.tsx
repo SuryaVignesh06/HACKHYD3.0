@@ -36,7 +36,7 @@ export function PeekProvider({ children }: { children: ReactNode }) {
         {incidentId && (
           <>
             <motion.div
-              className="fixed inset-0 z-40 bg-black/50"
+              className="fixed inset-0 z-40 bg-black/50 backdrop-blur-[2px]"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
@@ -46,13 +46,13 @@ export function PeekProvider({ children }: { children: ReactNode }) {
             <motion.aside
               role="dialog"
               aria-label={`Incident ${incidentId}`}
-              className="fixed right-0 top-0 z-50 flex h-full w-full max-w-2xl flex-col border-l glass-strong"
+              className="fixed right-2 top-2 z-50 flex h-[calc(100%-1rem)] w-full max-w-2xl flex-col overflow-hidden rounded-[24px] glass-strong"
               initial={{ x: 40, opacity: 0 }}
               animate={{ x: 0, opacity: 1 }}
               exit={{ x: 40, opacity: 0 }}
-              transition={{ duration: 0.2 }}
+              transition={{ type: "spring", stiffness: 380, damping: 34 }}
             >
-              <div className="flex items-center justify-between border-b border-border px-5 py-3">
+              <div className="flex items-center justify-between border-b border-white/[0.07] px-5 py-3.5">
                 <span className="font-mono text-sm text-memory">{incidentId}</span>
                 <div className="flex items-center gap-1">
                   <Link
@@ -98,16 +98,16 @@ export function LinkedText({ text }: { text: string }) {
 export function IncidentChip({ id, tone = "memory" }: { id: string; tone?: "memory" | "severity" | "success" | "muted" }) {
   const { open } = useIncidentPeek();
   const colors = {
-    memory: "border-memory/40 text-memory hover:bg-memory/10",
-    severity: "border-severity/40 text-severity hover:bg-severity/10",
-    success: "border-success/40 text-success hover:bg-success/10",
-    muted: "border-border text-muted hover:bg-surface",
+    memory: "border-memory/30 bg-memory/10 text-memory hover:bg-memory/20",
+    severity: "border-severity/30 bg-severity/10 text-severity hover:bg-severity/20",
+    success: "border-success/30 bg-success/10 text-success hover:bg-success/20",
+    muted: "border-white/10 bg-white/[0.04] text-muted hover:bg-white/10 hover:text-ink",
   }[tone];
   return (
     <button
       type="button"
       onClick={() => open(id)}
-      className={`inline-flex items-center rounded border px-1.5 py-0.5 font-mono text-[11px] leading-4 transition-colors duration-150 ${colors}`}
+      className={`inline-flex items-center rounded-full border px-2 py-[1px] font-mono text-[11px] leading-4 transition-colors duration-150 ${colors}`}
     >
       {id}
     </button>

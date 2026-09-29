@@ -28,6 +28,7 @@ class Settings(BaseSettings):
 
     DATABASE_URL: str = f"sqlite:///{(REPO_ROOT / 'backend' / 'oncall.db').as_posix()}"
     FRONTEND_ORIGIN: str = "http://localhost:5173"
+    DEMO_TOOLS: bool = True  # Seed and Reset demo endpoints; set false on a public deployment
 
 
 @lru_cache

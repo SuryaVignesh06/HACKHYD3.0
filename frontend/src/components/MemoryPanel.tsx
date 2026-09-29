@@ -8,7 +8,7 @@ const TYPE_LABEL: Record<string, string> = { world: "fact", experience: "experie
 const CITE_FLOOR = 0.75; // mirrors backend evidence.CITE_FLOOR: below this an incident is context, never evidence
 
 export default function MemoryPanel({ state, matched, recalled, cited }: {
-  state: "off" | "idle" | "searching" | "ready";
+  state: "off" | "idle" | "searching" | "ready" | "unavailable";
   matched: MatchedIncident[];
   recalled: RecalledMemory[];
   cited: string[];
@@ -18,6 +18,13 @@ export default function MemoryPanel({ state, matched, recalled, cited }: {
   }
   if (state === "idle") {
     return <p className="text-sm text-muted">Diagnose an alert to see the past incidents Hindsight recalls, and why.</p>;
+  }
+  if (state === "unavailable") {
+    return (
+      <p className="text-sm text-amber-300">
+        Hindsight unavailable. Nothing was recalled, so the diagnosis uses the current context only.
+      </p>
+    );
   }
   if (state === "searching") {
     return (
@@ -33,7 +40,7 @@ export default function MemoryPanel({ state, matched, recalled, cited }: {
   return (
     <div className="space-y-5">
       <div className="space-y-2">
-        <p className="text-xs text-muted">Matched incidents, by Hindsight relevance</p>
+        <p className="eyebrow">Matched incidents, by Hindsight relevance</p>
         <ul className="space-y-1.5">
           {matched.map((m, i) => {
             const isCited = cited.includes(m.id);
@@ -43,13 +50,13 @@ export default function MemoryPanel({ state, matched, recalled, cited }: {
                 initial={{ opacity: 0, x: 8 }}
                 animate={{ opacity: 1, x: 0 }}
                 transition={{ duration: 0.2, delay: i * 0.07 }}
-                className={`rounded-xl border p-2.5 ${isCited ? "border-memory/40 bg-memory/10" : "glass-well"}`}
+                className={`rounded-2xl border p-3 ${isCited ? "border-memory/35 bg-memory/[0.08]" : "glass-well"}`}
               >
                 <div className="flex items-center justify-between gap-2">
                   <IncidentChip id={m.id} tone={isCited ? "memory" : "muted"} />
                   <span className={`font-mono text-xs ${m.relevance >= CITE_FLOOR ? "text-ink" : "text-muted"}`}>{percent(m.relevance)}</span>
                 </div>
-                <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-border">
+                <div className="mt-2 h-1 overflow-hidden rounded-full bg-white/[0.07]">
                   <div
                     className={`h-full rounded-full ${isCited ? "bg-memory" : "bg-muted/60"}`}
                     style={{ width: `${Math.round(m.relevance * 100)}%` }}
@@ -67,7 +74,7 @@ export default function MemoryPanel({ state, matched, recalled, cited }: {
       </div>
 
       <div className="space-y-2">
-        <p className="text-xs text-muted">Recalled memories ({recalled.length})</p>
+        <p className="eyebrow">Recalled memories ({recalled.length})</p>
         <ul className="space-y-1.5">
           {recalled.map((memory, i) => {
             const { fact, meta } = splitMemoryText(memory.text);
@@ -77,11 +84,11 @@ export default function MemoryPanel({ state, matched, recalled, cited }: {
                 initial={{ opacity: 0, y: 6 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.2, delay: Math.min(i, 12) * 0.07 }}
-                className="rounded-xl glass-well p-2.5"
+                className="glass-well rounded-2xl p-3"
               >
                 <div className="mb-1 flex flex-wrap items-center gap-1.5">
                   {memory.incident_id && <IncidentChip id={memory.incident_id} tone="muted" />}
-                  <span className="flex items-center gap-1 rounded bg-surface px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-muted">
+                  <span className="flex items-center gap-1 rounded-full bg-white/[0.06] px-2 py-0.5 text-[10px] uppercase tracking-wide text-muted">
                     <BrainCircuit className="h-3 w-3" aria-hidden="true" />
                     {TYPE_LABEL[memory.type] ?? memory.type}
                   </span>

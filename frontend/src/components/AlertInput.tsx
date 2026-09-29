@@ -15,6 +15,7 @@ export interface AlertDraft {
 export interface DemoChoice {
   key: string;
   label: string;
+  title: string;
   service: string;
   severity: string;
   alertText: string;
@@ -25,6 +26,7 @@ export function demoChoices(alerts: DemoAlert[]): DemoChoice[] {
   const choices: DemoChoice[] = alerts.map((a) => ({
     key: a.id,
     label: a.id,
+    title: a.title,
     service: a.service,
     severity: a.severity,
     alertText: a.alert_text,
@@ -35,6 +37,7 @@ export function demoChoices(alerts: DemoAlert[]): DemoChoice[] {
       choices.push({
         key: `${a.id}-follow-up`,
         label: `${a.id} follow-up`,
+        title: `Follow-up on ${a.follow_up_service}`,
         service: a.follow_up_service,
         severity: a.severity,
         alertText: a.follow_up_alert,
@@ -51,7 +54,7 @@ const LEVEL_COLOR: Record<DemoSignal["level"], string> = {
   critical: "text-severity",
 };
 
-export default function AlertInput({ draft, onDraftChange, demos, busy, onSubmit, onNewIncident, hasIncident }: {
+export default function AlertInput({ draft, onDraftChange, demos, busy, onSubmit, onNewIncident, hasIncident, simulateRequest }: {
   draft: AlertDraft;
   onDraftChange: (draft: AlertDraft) => void;
   demos: DemoChoice[];
@@ -59,14 +62,22 @@ export default function AlertInput({ draft, onDraftChange, demos, busy, onSubmit
   onSubmit: (draft: AlertDraft) => void;
   onNewIncident: () => void;
   hasIncident: boolean;
+  simulateRequest?: { choice: DemoChoice; nonce: number } | null;
 }) {
-  const [signals, setSignals] = useState<DemoSignal[]>([]);
   const [simulating, setSimulating] = useState<string | null>(null);
+  const [signals, setSignals] = useState<DemoSignal[]>([]);
   const timers = useRef<number[]>([]);
+  const canSubmit = draft.alertText.trim().length > 0 && !busy;
 
-  useEffect(() => () => timers.current.forEach((t) => window.clearTimeout(t)), []);
+  useEffect(() => {
+    return () => timers.current.forEach((t) => window.clearTimeout(t));
+  }, []);
 
-  const canSubmit = !busy && !simulating && draft.alertText.trim().length >= 10;
+  useEffect(() => {
+    if (!simulateRequest) return;
+    simulate(simulateRequest.choice);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [simulateRequest?.nonce]);
 
   function submit(e?: FormEvent) {
     e?.preventDefault();
@@ -104,35 +115,53 @@ export default function AlertInput({ draft, onDraftChange, demos, busy, onSubmit
   }
 
   return (
-    <form onSubmit={submit} className="flex h-full flex-col gap-4">
+    <form onSubmit={submit} className="flex flex-col gap-3">
       <div>
-        <p className="mb-2 text-xs text-muted">Demo alerts</p>
+        <p className="eyebrow mb-2">Demo alerts</p>
         <div className="flex flex-col gap-1.5">
-          {demos.map((choice) => (
-            <div key={choice.key} className="flex items-center gap-1.5">
-              <button
-                type="button"
-                disabled={busy || simulating !== null}
-                onClick={() => pick(choice)}
-                className="flex flex-1 items-center justify-between gap-2 rounded-lg glass-well px-2.5 py-1.5 text-left text-xs hover:border-memory/50 disabled:opacity-50"
+          {demos.map((choice) => {
+            const isSelected = draft.alertText === choice.alertText;
+            const hasSignals = choice.signals.length > 0;
+            const isThisSimulating = simulating === choice.key;
+
+            return (
+              <div
+                key={choice.key}
+                onClick={() => !busy && pick(choice)}
+                className={`group relative flex cursor-pointer flex-col gap-1 rounded-xl border p-2.5 transition-all ${
+                  isSelected
+                    ? "border-memory/50 bg-memory/[0.08] shadow-[0_0_12px_rgba(20,184,166,0.12)]"
+                    : "border-white/[0.06] bg-white/[0.025] hover:border-white/[0.12] hover:bg-white/[0.05]"
+                } ${busy ? "opacity-60 cursor-not-allowed" : ""}`}
               >
-                <span className="font-mono text-ink">{choice.label}</span>
-                <span className="truncate font-mono text-muted">{choice.service}</span>
-              </button>
-              {choice.signals.length > 0 && (
-                <button
-                  type="button"
-                  disabled={busy || simulating !== null}
-                  onClick={() => simulate(choice)}
-                  title="Simulate incident: replay monitoring signals, then open the incident"
-                  aria-label={`Simulate ${choice.label}`}
-                  className="rounded-lg glass-well p-1.5 text-severity hover:border-severity/50 disabled:opacity-50"
-                >
-                  <Radio className="h-3.5 w-3.5" aria-hidden="true" />
-                </button>
-              )}
-            </div>
-          ))}
+                <div className="flex items-center justify-between gap-1.5">
+                  <div className="flex min-w-0 items-center gap-1.5">
+                    <span className="font-mono text-xs font-semibold text-ink">{choice.label}</span>
+                    <span className="font-mono text-[10px] text-muted truncate">{choice.service}</span>
+                  </div>
+
+                  {hasSignals && (
+                    <button
+                      type="button"
+                      disabled={busy || simulating !== null}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        simulate(choice);
+                      }}
+                      title="Simulate incident: replay signals, then open"
+                      className="flex items-center gap-1 rounded-md border border-severity/30 bg-severity/10 px-2 py-0.5 text-[10px] font-medium text-severity transition-colors hover:bg-severity/20 disabled:opacity-50"
+                    >
+                      <Radio className={`h-2.5 w-2.5 ${isThisSimulating ? "animate-pulse" : ""}`} aria-hidden="true" />
+                      <span>Simulate</span>
+                    </button>
+                  )}
+                </div>
+                <p className="line-clamp-2 text-[11px] leading-snug text-muted group-hover:text-ink/80 transition-colors">
+                  {choice.title}
+                </p>
+              </div>
+            );
+          })}
         </div>
       </div>
 
@@ -143,7 +172,7 @@ export default function AlertInput({ draft, onDraftChange, demos, busy, onSubmit
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0 }}
             transition={{ duration: 0.15 }}
-            className="rounded-lg glass-well p-2.5"
+            className="glass-well rounded-xl p-2.5"
           >
             <p className="mb-1.5 flex items-center gap-1.5 text-[11px] uppercase tracking-wide text-muted">
               <Radio className={`h-3 w-3 ${simulating ? "animate-pulse text-severity" : ""}`} aria-hidden="true" />
@@ -161,15 +190,15 @@ export default function AlertInput({ draft, onDraftChange, demos, busy, onSubmit
         )}
       </AnimatePresence>
 
-      <label className="flex min-h-[190px] flex-1 flex-col gap-1.5">
-        <span className="text-xs text-muted">Alert, log or stack trace</span>
+      <label className="flex flex-col gap-1.5">
+        <span className="eyebrow">Alert, log or stack trace</span>
         <textarea
           value={draft.alertText}
           onChange={(e) => onDraftChange({ ...draft, alertText: e.target.value })}
           onKeyDown={onKeyDown}
           spellCheck={false}
           placeholder="[FIRING] ... paste the alert or log lines here"
-          className="min-h-[160px] flex-1 resize-none rounded-lg glass-well p-3 font-mono text-xs leading-5 text-ink placeholder:text-muted/60 focus:border-memory/60"
+          className="glass-well h-24 resize-none rounded-xl p-3 font-mono text-xs leading-5 text-ink placeholder:text-muted/60 focus:border-memory/50"
         />
       </label>
 
@@ -179,7 +208,7 @@ export default function AlertInput({ draft, onDraftChange, demos, busy, onSubmit
           <select
             value={draft.service}
             onChange={(e) => onDraftChange({ ...draft, service: e.target.value })}
-            className="rounded-lg glass-well px-2 py-1.5 font-mono text-xs text-ink"
+            className="glass-well rounded-xl px-2.5 py-1.5 font-mono text-xs text-ink"
           >
             {SERVICES.map((s) => (
               <option key={s} value={s}>
@@ -193,7 +222,7 @@ export default function AlertInput({ draft, onDraftChange, demos, busy, onSubmit
           <select
             value={draft.severity}
             onChange={(e) => onDraftChange({ ...draft, severity: e.target.value })}
-            className="rounded-lg glass-well px-2 py-1.5 font-mono text-xs text-ink"
+            className="glass-well rounded-xl px-2.5 py-1.5 font-mono text-xs text-ink"
           >
             {SEVERITIES.map((s) => (
               <option key={s} value={s}>
@@ -204,11 +233,11 @@ export default function AlertInput({ draft, onDraftChange, demos, busy, onSubmit
         </label>
       </div>
 
-      <div className="flex gap-2">
+      <div className="flex gap-2 pt-1 pb-1">
         <button
           type="submit"
           disabled={!canSubmit}
-          className="flex flex-1 items-center justify-center gap-2 rounded-md bg-memory px-3 py-2 text-sm font-medium text-bg hover:bg-memory/90 disabled:cursor-not-allowed disabled:opacity-40"
+          className="btn btn-primary flex-1 py-2 text-xs font-semibold shadow-md shadow-teal-900/20"
         >
           <Search className="h-4 w-4" aria-hidden="true" /> Diagnose
           <span className="font-mono text-[10px] opacity-70">Ctrl+Enter</span>
@@ -219,7 +248,7 @@ export default function AlertInput({ draft, onDraftChange, demos, busy, onSubmit
             onClick={onNewIncident}
             disabled={busy}
             title="Start a new incident"
-            className="flex items-center gap-1.5 rounded-md border border-border px-3 py-2 text-xs text-muted hover:text-ink disabled:opacity-40"
+            className="btn btn-secondary px-3"
           >
             <SquarePen className="h-3.5 w-3.5" aria-hidden="true" /> New
           </button>

@@ -9,12 +9,38 @@ export interface ActiveWindowInfo {
   pid: number;
 }
 
+/** The IDE, folder and file in the foreground window title, resolved against the IDE's own folder records. */
+export interface IdeContext {
+  ide: string;
+  folder: string | null;
+  folderPath: string | null;
+  file: string | null;
+}
+
+export interface ScreenReading {
+  ok: boolean;
+  found: boolean;
+  text: string;
+  lineCount: number;
+  ms: number;
+  message?: string;
+}
+
 export interface Activation {
   window: ActiveWindowInfo | null;
+  ide?: IdeContext | null;
   clipboard: string;
   at: string;
   openedInMs: number;
 }
+
+export type VoiceEvent =
+  | { type: "ready" }
+  | { type: "level"; value: number }
+  | { type: "partial"; text: string }
+  | { type: "final"; text: string }
+  | { type: "error"; message: string }
+  | { type: "done" };
 
 export type ChooseProjectResult = { project: ProjectOut } | { cancelled: true } | { error: string };
 
@@ -26,11 +52,16 @@ export interface CopilotBridge {
   onShortcutUpdated?(callback: (payload: { shortcut: string; registered: boolean }) => void): () => void;
   onActivated(callback: (payload: Activation) => void): () => void;
   hide(): void;
-  setExpanded(value: boolean): void;
+  onDismiss?(callback: () => void): () => void;
+  voiceSupported?: boolean;
+  voiceStart?(): Promise<{ ok: boolean; message: string }>;
+  voiceStop?(): void;
+  onVoice?(callback: (event: VoiceEvent) => void): () => void;
   openConsole(route: string): void;
   chooseProject(): Promise<ChooseProjectResult>;
   openFile(path: string, line: number): Promise<{ ok: boolean; via: string; message: string }>;
-  captureScreen(): Promise<{ ok: boolean; dataUrl?: string; message?: string }>;
+  readScreen?(): Promise<ScreenReading>;
+  authorizeFolder?(folder: string): Promise<ChooseProjectResult>;
 }
 
 declare global {

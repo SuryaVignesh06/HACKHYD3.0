@@ -81,6 +81,19 @@ When started, Electron:
 
 **Reset demo** (Memory page, or `python scripts/reset_demo.py`) reseeds Hindsight, removes demo incidents and restores the demo project config. Connected projects are kept.
 
+**Seed engineering memory** (Memory page, or `POST /api/memory/seed`) retains only the historical postmortems whose incident ID is not already a document in the bank, so it never duplicates. It returns `{status, bank, created, skipped, memory_count}`; on a seeded bank it answers `already_seeded` with 45 skipped. Both Seed and Reset are development tools: set `DEMO_TOOLS=false` on a public deployment and the endpoints return 403 and the buttons disappear.
+
+### Verified end to end (2026-09-29, live Hindsight and OpenRouter, redesigned UI)
+
+1. Seed: `already_seeded`, 0 created, 45 skipped (no duplicates).
+2. INC-049 (`RedisConnectionError: Maximum connections reached 20/20`): recall returned 70 memories and 6 related incidents; the fix log split into 4 successful fixes and 5 failed approaches; project inspection found `REDIS_MAX_POOL: "20"` at `values-prod.yaml:19` with "INC-030/INC-037: from 20 to 50"; precedent confirmed, 6 verified citations. Memory off on the same incident: a generic answer with no citations.
+3. Worked, then resolved: postmortem retained, memory 238 to 240.
+4. INC-050, a similar alert: recall ranked **INC-049** at 99% with `learned_live`, it was cited, and its fix appeared under "Worked before". In the overlay the next run opened with "I remember this resolution."
+
+If Hindsight is unreachable during a diagnosis, the recall step says "Hindsight unavailable", nothing is shown as recalled, and the answer is marked as based on the current context only (`memory_unavailable: true`).
+
+Tagged development logs (`[CONTEXT]`, `[RECALL]`, `[REFLECT]`, `[PROJECT SEARCH]`, `[DIAGNOSIS]`, `[USER ACTION]`, `[OUTCOME]`, `[RETAIN]`) come from the `oncall.agent` logger in the backend console.
+
 ### Verified end to end (2026-09-28, live Hindsight and OpenRouter)
 
 1. Project connected, simulator logging Redis errors; the overlay detected the project (9 files) and the error block in `logs/payments-api.log`.
@@ -185,7 +198,7 @@ All Hindsight calls live in [backend/app/services/memory.py](backend/app/service
 
 | Moment | Call | Notes |
 | --- | --- | --- |
-| Seed history | `aretain_batch` | One item per postmortem: `document_id` = incident ID, `timestamp` = resolved time, `context` = `postmortem`, `metadata` = service and severity |
+| Seed history | `documents.list_documents` + `aretain_batch` | Existing document IDs are listed first, so only missing incidents are retained. One item per postmortem: `document_id` = incident ID, `timestamp` = resolved time, `context` = `postmortem`, `metadata` = service and severity |
 | Bank setup | `acreate_bank`, `acreate_directive` | Mission, disposition (skepticism 4, literalism 3, empathy 2) and four directives: cite incident IDs, warn about failed fixes, pair destructive commands with a rollback, say plainly when nothing matches |
 | First diagnosis of a new incident | `aretain` | `context` = `alert`, `retain_async=True`, retained after the investigation so the incident never matches itself |
 | Diagnose | `arecall` | Types world, experience and observation; budget mid; chunks included; the reranker score becomes the relevance shown in the UI |
@@ -193,6 +206,7 @@ All Hindsight calls live in [backend/app/services/memory.py](backend/app/service
 | Fix attempt | `aretain` | `context` = `fix-attempt`, `metadata.outcome` = worked, failed or partial, `retain_async=True` so the outcome buttons stay fast |
 | Resolve | `aretain` | `context` = `postmortem`, synchronous so the next diagnosis already knows; the response carries the retained text and the memory count before and after |
 | Memory count | `alist_memories` | Total memories and observations in the bank, for the top bar and Experience Captured |
+| Ask the history (overlay) | `arecall` + `areflect` | `POST /api/memory/ask`: recall picks the incidents, reflect answers; incident IDs recall did not return are scrubbed from the answer |
 | Patterns page | `alist_memories(type="observation")` + `areflect` | Cross-incident observations Hindsight consolidated on its own, plus a reflect answer cached per memory count |
 
 ### Adaptations to hindsight-client 0.10.1

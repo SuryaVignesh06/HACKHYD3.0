@@ -13,6 +13,7 @@ from app.models import (
     AttemptFacts,
     AvoidFix,
     DiagnosisDraft,
+    FixRecord,
     FixSuggestion,
     Hypothesis,
     MatchedIncident,
@@ -45,6 +46,7 @@ class KnownIncident:
     title: str
     service: str
     occurred_at: datetime | None
+    live: bool = False  # resolved in the app rather than seeded
 
 
 def parse_alert(alert_text: str, service_hint: str | None = None, severity_hint: str | None = None) -> ParsedAlert:
@@ -91,6 +93,7 @@ def matched_incidents(recalled: list[RecalledMemory], known: dict[str, KnownInci
             service=known[iid].service,
             relevance=round(score, 4),
             occurred_at=known[iid].occurred_at,
+            learned_live=known[iid].live,
         )
         for iid, score in ranked
     ]
@@ -119,6 +122,19 @@ def confirm_precedent(candidates: set[str], hindsight_strong: bool | None, llm_s
     return strong, (candidates if strong else set())
 
 
+def fix_records(attempts_by_incident: dict[str, list[AttemptFacts]], incident_ids: list[str]) -> tuple[list[FixRecord], list[FixRecord]]:
+    """What worked and what failed across the given recalled incidents, in recall order, exact duplicates removed."""
+    worked: list[FixRecord] = []
+    failed: list[FixRecord] = []
+    for iid in incident_ids:
+        for attempt in attempts_by_incident.get(iid, []):
+            target = worked if attempt.outcome == "worked" else failed if attempt.outcome == "failed" else None
+            if target is None or any(r.incident_id == iid and r.action == attempt.action for r in target):
+                continue
+            target.append(FixRecord(action=attempt.action, incident_id=iid, outcome=attempt.outcome, notes=attempt.notes))
+    return worked, failed
+
+
 def attempt_index(attempts_by_incident: dict[str, list[AttemptFacts]]) -> dict[str, tuple[str, AttemptFacts]]:
     """Stable references such as INC-030#1 for every attempt the LLM is allowed to cite."""
     index: dict[str, tuple[str, AttemptFacts]] = {}
@@ -145,6 +161,21 @@ def scrub_unverified(text: str, allowed: set[str]) -> str:
     kept = [s for s in SENTENCE_SPLIT.split(text.strip())
             if all(iid in allowed for iid in INCIDENT_ID.findall(s))]
     return " ".join(kept).strip()
+
+
+def scrub_unverified_lines(text: str, allowed: set[str]) -> str:
+    """scrub_unverified per line, so markdown headings and bullets keep their structure."""
+    lines: list[str] = []
+    for line in text.splitlines():
+        if not line.strip():
+            if lines and lines[-1] != "":
+                lines.append("")
+            continue
+        indent = line[: len(line) - len(line.lstrip())]
+        kept = scrub_unverified(line, allowed)
+        if kept and kept.strip("*#-_ ") != "":
+            lines.append(indent + kept)
+    return "\n".join(lines).strip()
 
 
 @dataclass

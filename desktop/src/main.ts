@@ -1,13 +1,12 @@
 // On-Call Copilot desktop shell: the console window, the global-shortcut overlay, and the few native
 // capabilities the web UI cannot have (active window, clipboard, screen capture, folder consent, open in editor).
 import { spawn } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync, statSync, writeFileSync } from "node:fs";
+import { isAbsolute, join } from "node:path";
 import {
   BrowserWindow,
   app,
   clipboard,
-  desktopCapturer,
   dialog,
   globalShortcut,
   ipcMain,
@@ -17,17 +16,20 @@ import {
 import { foregroundWindow, stop as stopForeground, warmUp } from "./activeWindow";
 import { config } from "./env";
 import { startServices, stopServices } from "./serverManager";
+import { detectIde } from "./ide";
+import { readScreen } from "./screenRead";
 import { SPLASH_HTML } from "./splash";
+import { startVoice, stopVoice, voiceSupported } from "./voice";
 
-const COMPACT = { width: 500, height: 600 };
-const EXPANDED = { width: 540, height: 860 };
+const FADE_IN_MS = 140;
+const FADE_OUT_MS = 110;
 const UNSAFE_PATH = /["&|<>^%!\r\n]/;
 
 let mainWindow: BrowserWindow | null = null;
 let overlay: BrowserWindow | null = null;
 let activeShortcut = config.shortcut;
 let shortcutRegistered = false;
-let expanded = false;
+let fadeTimer: NodeJS.Timeout | null = null;
 let quitting = false;
 
 function preload(): string {
@@ -40,7 +42,7 @@ function createMainWindow(): void {
     height: 920,
     minWidth: 1024,
     minHeight: 700,
-    backgroundColor: "#0B0D10",
+    backgroundColor: "#000000",
     title: "On-Call Copilot",
     autoHideMenuBar: true,
     show: false,
@@ -57,11 +59,14 @@ function createMainWindow(): void {
 
 function createOverlay(): void {
   overlay = new BrowserWindow({
-    ...COMPACT,
+    // Covers the whole display: Windows 11 acrylic blurs whatever is behind it, the page adds a dark tint, and the
+    // card floats in the middle. Acrylic needs an opaque window; a transparent one only shows a flat grey.
+    ...screen.getPrimaryDisplay().bounds,
     frame: false,
-    transparent: true,
+    transparent: false,
+    backgroundMaterial: "acrylic",
     resizable: false,
-    movable: true,
+    movable: false,
     skipTaskbar: true,
     show: false,
     alwaysOnTop: true,
@@ -70,42 +75,68 @@ function createOverlay(): void {
     title: "On-Call Copilot",
     webPreferences: { preload: preload(), contextIsolation: true, sandbox: true },
   });
-  overlay.setAlwaysOnTop(true, "floating");
+  overlay.setAlwaysOnTop(true, "screen-saver");
   overlay.setVisibleOnAllWorkspaces(true);
   overlay.webContents.on("did-finish-load", () => broadcastShortcutStatus());
-  // The overlay deliberately stays open on blur, so the engineer can switch to the editor to apply the fix.
+  // Clicking outside the card or pressing Escape closes the overlay; an open incident is kept for when it comes back.
   void overlay.loadURL(`${config.frontendUrl}/overlay`);
 }
 
 function placeOverlay(): void {
   if (!overlay) return;
   const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
-  const size = expanded ? EXPANDED : COMPACT;
-  const height = Math.min(size.height, display.workArea.height - 48);
-  overlay.setBounds({
-    x: display.workArea.x + display.workArea.width - size.width - 24,
-    y: display.workArea.y + 24,
-    width: size.width,
-    height,
+  overlay.setBounds(display.bounds);
+}
+
+/** Window-level fade, so the blurred backdrop eases in and out with the card. */
+function fade(win: BrowserWindow, to: number, ms: number, done?: () => void): void {
+  if (fadeTimer) clearInterval(fadeTimer);
+  const from = win.getOpacity();
+  const started = Date.now();
+  fadeTimer = setInterval(() => {
+    const t = Math.min(1, (Date.now() - started) / ms);
+    if (!win.isDestroyed()) win.setOpacity(from + (to - from) * t);
+    if (t >= 1) {
+      if (fadeTimer) clearInterval(fadeTimer);
+      fadeTimer = null;
+      done?.();
+    }
+  }, 16);
+}
+
+function hideOverlay(): void {
+  stopVoice();
+  if (!overlay || !overlay.isVisible()) return;
+  const win = overlay;
+  fade(win, 0, FADE_OUT_MS, () => {
+    win.hide();
+    win.setOpacity(1);
   });
 }
 
 async function activate(): Promise<void> {
   if (!overlay) return;
   if (overlay.isVisible() && overlay.isFocused()) {
-    overlay.hide();
+    // Let the card play its close animation first; the renderer hides the window when it finishes.
+    overlay.webContents.send("copilot:dismiss");
     return;
   }
   const started = Date.now();
   // Read the foreground window before the overlay takes focus.
   const window = await foregroundWindow(300);
+  const ide = detectIde(window);
   const text = clipboard.readText().slice(0, 6000);
   placeOverlay();
+  overlay.setOpacity(0);
   overlay.show();
   overlay.focus();
+  fade(overlay, 1, FADE_IN_MS);
   const openedInMs = Date.now() - started;
-  overlay.webContents.send("copilot:activated", { window, clipboard: text, at: new Date().toISOString(), openedInMs });
-  console.log(`On-Call Copilot: overlay opened in ${openedInMs} ms (foreground: ${window ? `${window.process} "${window.title}"` : "unknown"})`);
+  overlay.webContents.send("copilot:activated", { window, ide, clipboard: text, at: new Date().toISOString(), openedInMs });
+  console.log(
+    `On-Call Copilot: overlay opened in ${openedInMs} ms (foreground: ${window ? `${window.process} "${window.title}"` : "unknown"}` +
+      `${ide ? `; IDE ${ide.ide}, folder ${ide.folderPath ?? ide.folder ?? "unknown"}, file ${ide.file ?? "none"}` : ""})`,
+  );
   if (config.captureDir) scheduleSelfTestCaptures();
 }
 
@@ -177,21 +208,17 @@ async function api<T>(path: string, init?: RequestInit): Promise<{ ok: true; dat
   }
 }
 
-async function chooseProject(): Promise<unknown> {
+/** The native consent dialog. The backend only reads folders registered through here. */
+async function consentToFolder(folder: string): Promise<unknown> {
   const parent = (overlay?.isVisible() ? overlay : mainWindow) ?? undefined;
-  const picked = parent
-    ? await dialog.showOpenDialog(parent, { title: "Choose the project On-Call Copilot may inspect", properties: ["openDirectory"] })
-    : await dialog.showOpenDialog({ title: "Choose the project On-Call Copilot may inspect", properties: ["openDirectory"] });
-  const folder = picked.filePaths[0];
-  if (picked.canceled || !folder) return { cancelled: true };
   const options = {
     type: "question" as const,
     title: "Project access",
-    message: `On-Call Copilot wants to inspect:\n${folder}`,
+    message: `Allow On-Call Copilot to read this folder?\n${folder}`,
     detail:
-      "This allows the agent to read source files, configuration, logs and the project structure inside this folder only. " +
+      "The agent can read source files, configuration, logs and the project structure inside this folder only. " +
       "It never writes to the folder and never reads outside it.",
-    buttons: ["Allow once", "Always allow for this project", "Cancel"],
+    buttons: ["Allow once", "Always allow for this project", "Don't allow"],
     defaultId: 1,
     cancelId: 2,
     noLink: true,
@@ -203,6 +230,24 @@ async function chooseProject(): Promise<unknown> {
     body: JSON.stringify({ root_path: folder, scope: answer.response === 0 ? "once" : "always" }),
   });
   return result.ok ? { project: result.data } : { error: result.message };
+}
+
+async function chooseProject(): Promise<unknown> {
+  const parent = (overlay?.isVisible() ? overlay : mainWindow) ?? undefined;
+  const picked = parent
+    ? await dialog.showOpenDialog(parent, { title: "Choose the project On-Call Copilot may inspect", properties: ["openDirectory"] })
+    : await dialog.showOpenDialog({ title: "Choose the project On-Call Copilot may inspect", properties: ["openDirectory"] });
+  const folder = picked.filePaths[0];
+  if (picked.canceled || !folder) return { cancelled: true };
+  return consentToFolder(folder);
+}
+
+/** A folder detected from the IDE title; it must exist and still goes through the same consent dialog. */
+async function authorizeFolder(folder: unknown): Promise<unknown> {
+  if (typeof folder !== "string" || !isAbsolute(folder) || !existsSync(folder) || !statSync(folder).isDirectory()) {
+    return { error: "That folder is not available." };
+  }
+  return consentToFolder(folder);
 }
 
 async function openFile(path: string, line: number): Promise<{ ok: boolean; via: string; message: string }> {
@@ -222,28 +267,6 @@ async function openFile(path: string, line: number): Promise<{ ok: boolean; via:
     : { ok: true, via: "default-app", message: "Opened with the default app (VS Code was not available, so the line is not selected)." };
 }
 
-async function captureScreen(): Promise<{ ok: boolean; dataUrl?: string; message?: string }> {
-  const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
-  const wasVisible = overlay?.isVisible() ?? false;
-  overlay?.hide();
-  await new Promise((resolve) => setTimeout(resolve, 200));
-  try {
-    const width = 1600;
-    const height = Math.round((display.size.height / display.size.width) * width);
-    const sources = await desktopCapturer.getSources({ types: ["screen"], thumbnailSize: { width, height } });
-    const source = sources.find((s) => s.display_id === String(display.id)) ?? sources[0];
-    if (!source) return { ok: false, message: "No screen was available to capture." };
-    return { ok: true, dataUrl: source.thumbnail.toDataURL() };
-  } catch {
-    return { ok: false, message: "Screen capture was blocked by the operating system." };
-  } finally {
-    if (wasVisible) {
-      overlay?.show();
-      overlay?.focus();
-    }
-  }
-}
-
 async function removeOnceProjects(): Promise<void> {
   const projects = await api<{ id: number; scope: string }[]>("/api/projects");
   if (!projects.ok) return;
@@ -253,14 +276,16 @@ async function removeOnceProjects(): Promise<void> {
 }
 
 ipcMain.on("copilot:config", (event) => {
-  event.returnValue = { shortcut: activeShortcut, shortcutRegistered, apiBase: config.apiBase };
+  event.returnValue = { shortcut: activeShortcut, shortcutRegistered, apiBase: config.apiBase, voice: voiceSupported() };
 });
 ipcMain.on("copilot:toggle-overlay", () => void activate());
-ipcMain.on("copilot:hide", () => overlay?.hide());
-ipcMain.on("copilot:set-expanded", (_event, value: boolean) => {
-  expanded = Boolean(value);
-  placeOverlay();
-});
+ipcMain.on("copilot:hide", () => hideOverlay());
+ipcMain.handle("copilot:voice-start", (event) =>
+  startVoice((voiceEvent) => {
+    if (!event.sender.isDestroyed()) event.sender.send("copilot:voice", voiceEvent);
+  }),
+);
+ipcMain.on("copilot:voice-stop", () => stopVoice());
 ipcMain.on("copilot:open-console", (_event, route: string) => {
   if (!mainWindow) return;
   if (typeof route === "string" && route.startsWith("/")) void mainWindow.loadURL(`${config.frontendUrl}${route}`);
@@ -271,7 +296,8 @@ ipcMain.handle("copilot:choose-project", () => chooseProject());
 ipcMain.handle("copilot:open-file", (_event, path: string, line: number) =>
   typeof path === "string" && typeof line === "number" ? openFile(path, line) : { ok: false, via: "none", message: "Invalid request." },
 );
-ipcMain.handle("copilot:capture-screen", () => captureScreen());
+ipcMain.handle("copilot:read-screen", () => readScreen(overlay));
+ipcMain.handle("copilot:authorize-folder", (_event, folder: unknown) => authorizeFolder(folder));
 
 if (!app.requestSingleInstanceLock()) {
   app.quit();

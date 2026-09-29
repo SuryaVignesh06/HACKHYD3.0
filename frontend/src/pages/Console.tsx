@@ -1,24 +1,31 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Activity, BrainCircuit, CheckCheck, ClipboardList, Inbox, ListTree, RotateCcw, Siren } from "lucide-react";
+import { Activity, BrainCircuit, CheckCheck, ClipboardList, ListTree, RotateCcw, Siren } from "lucide-react";
 import ActionLog from "../components/ActionLog";
 import AlertInput, { demoChoices, type AlertDraft, type DemoChoice } from "../components/AlertInput";
-import DiagnosisCard from "../components/DiagnosisCard";
+import { ConsoleHero, MemorySnapshot } from "../components/ConsoleHome";
+import DiagnosisCard, { ModeLine } from "../components/DiagnosisCard";
+import ResultView from "../components/ResultView";
+import { FixHistory, Lifecycle } from "../components/DiagnosisSections";
 import { IncidentChip } from "../components/IncidentPeek";
 import InvestigationTimeline from "../components/InvestigationTimeline";
 import LearningCurve from "../components/LearningCurve";
 import MemoryPanel from "../components/MemoryPanel";
 import ResolveDrawer, { ExperienceCard } from "../components/ResolveDrawer";
 import Toast from "../components/Toast";
-import { Panel, SeverityBadge } from "../components/ui";
+import { ConfidenceBar, Panel, SeverityBadge } from "../components/ui";
+import { LinkedText } from "../components/IncidentPeek";
 import { api, streamDiagnosis } from "../lib/api";
 import type {
   AttemptLogged,
   Diagnosis,
+  EvidenceStepData,
   ExperienceCaptured,
+  FixRecord,
   IncidentCreated,
   InvestigationStep,
   LearningPoint,
   MatchedIncident,
+  MemoryOverview,
   Outcome,
   RecallStepData,
   RecalledMemory,
@@ -34,6 +41,8 @@ interface RunState {
   error: string | null;
   running: boolean;
   startedAt: number;
+  fix: { worked: FixRecord[]; failed: FixRecord[] } | null;
+  unavailable: boolean;
 }
 
 type RunKey = "on" | "off";
@@ -41,6 +50,10 @@ const keyOf = (memory: boolean): RunKey => (memory ? "on" : "off");
 
 function isRecallData(data: Record<string, unknown>): data is Record<string, unknown> & RecallStepData {
   return Array.isArray(data.matched) && Array.isArray(data.recalled);
+}
+
+function isEvidenceData(data: Record<string, unknown>): data is Record<string, unknown> & EvidenceStepData {
+  return Array.isArray(data.worked_fixes) && Array.isArray(data.failed_fixes);
 }
 
 function ImpactRow({ off, on }: { off: Diagnosis; on: Diagnosis }) {
@@ -51,29 +64,93 @@ function ImpactRow({ off, on }: { off: Diagnosis; on: Diagnosis }) {
     ["Confidence", off.confidence === null ? "n/a" : `${Math.round(off.confidence * 100)}%`, on.confidence === null ? "n/a" : `${Math.round(on.confidence * 100)}%`],
   ];
   return (
-    <table className="w-full text-xs">
-      <thead>
-        <tr className="text-left text-muted">
-          <th className="pb-1.5 font-normal">Memory impact, computed from the two answers</th>
-          <th className="pb-1.5 font-normal">Without</th>
-          <th className="pb-1.5 font-normal text-memory">With</th>
-        </tr>
-      </thead>
-      <tbody>
-        {rows.map(([label, a, b]) => (
-          <tr key={label} className="border-t border-border">
-            <td className="py-1.5 text-muted">{label}</td>
-            <td className="py-1.5 font-mono text-muted">{a}</td>
-            <td className="py-1.5 font-mono text-ink">{b}</td>
+    <div className="tile !p-0">
+      <table className="w-full text-xs">
+        <thead>
+          <tr className="text-left text-muted">
+            <th className="px-4 pb-2 pt-3 font-medium">Memory impact, computed from the two answers</th>
+            <th className="px-4 pb-2 pt-3 font-medium">Without</th>
+            <th className="px-4 pb-2 pt-3 font-medium text-memory">With</th>
           </tr>
-        ))}
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          {rows.map(([label, a, b]) => (
+            <tr key={label} className="border-t border-white/[0.06]">
+              <td className="px-4 py-2 text-muted">{label}</td>
+              <td className="px-4 py-2 font-mono text-muted">{a}</td>
+              <td className="px-4 py-2 font-mono text-ink">{b}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/** Short answer on top, details in tabs, one question at the bottom. */
+function ConsoleDiagnosis({ diagnosis, recorded, onOutcome }: {
+  diagnosis: Diagnosis;
+  recorded: Outcome | null;
+  onOutcome?: (action: string, outcome: Outcome) => void;
+}) {
+  if (diagnosis.degraded) return <DiagnosisCard diagnosis={diagnosis} />;
+  const learned = diagnosis.matched.some((m) => m.learned_live && diagnosis.cited_incidents.includes(m.id));
+  const headline = !diagnosis.memory_enabled
+    ? diagnosis.memory_unavailable
+      ? "Memory unavailable"
+      : "Answer without memory"
+    : learned
+      ? "I remember this one."
+      : diagnosis.strong_match
+        ? "I've seen this before."
+        : "Nothing quite like this yet.";
+  const tone = !diagnosis.memory_enabled ? (diagnosis.memory_unavailable ? "text-amber-300" : "text-muted") : diagnosis.strong_match ? "text-memory" : "text-amber-300";
+  const fix = diagnosis.try_first;
+  return (
+    <div className="space-y-4">
+      <div className="space-y-2">
+        <p className={`text-xl font-semibold tracking-tight ${tone}`}>{headline}</p>
+        <p className="text-sm leading-6 text-ink">
+          <LinkedText text={diagnosis.summary} />
+        </p>
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+          <ModeLine diagnosis={diagnosis} />
+          <span className="flex items-center gap-2 text-xs text-muted">
+            Confidence <ConfidenceBar value={diagnosis.confidence} tone={diagnosis.memory_enabled ? "memory" : "muted"} />
+          </span>
+        </div>
+      </div>
+      <ResultView diagnosis={diagnosis} />
+      {onOutcome && fix && (
+        <div className="flex flex-wrap items-center gap-2 border-t border-white/[0.06] pt-4">
+          {recorded ? (
+            <span className={`text-xs ${recorded === "worked" ? "text-success" : recorded === "partial" ? "text-amber-300" : "text-severity"}`}>
+              Recorded: the first fix {recorded === "worked" ? "worked" : recorded === "partial" ? "partly worked" : "did not work"}. It was sent to memory.
+            </span>
+          ) : (
+            <>
+              <span className="mr-1 text-xs text-muted">Did the first fix work?</span>
+              <button type="button" onClick={() => onOutcome(fix.action, "worked")} className="btn btn-success btn-sm">
+                Worked
+              </button>
+              <button type="button" onClick={() => onOutcome(fix.action, "partial")} className="btn btn-amber btn-sm">
+                Partly
+              </button>
+              <button type="button" onClick={() => onOutcome(fix.action, "failed")} className="btn btn-danger btn-sm">
+                Didn't work
+              </button>
+            </>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 
 export default function Console({ memoryOn, refreshStats, projectId }: { memoryOn: boolean; refreshStats: () => void; projectId: number | null }) {
   const [demos, setDemos] = useState<DemoChoice[]>([]);
+  const [overview, setOverview] = useState<MemoryOverview | null>(null);
+  const [simulateRequest, setSimulateRequest] = useState<{ choice: DemoChoice; nonce: number } | null>(null);
   const [draft, setDraft] = useState<AlertDraft>({ alertText: "", service: "payments-api", severity: "SEV1" });
   const [incident, setIncident] = useState<IncidentCreated | null>(null);
   const [createError, setCreateError] = useState<string | null>(null);
@@ -94,6 +171,7 @@ export default function Console({ memoryOn, refreshStats, projectId }: { memoryO
 
   useEffect(() => {
     void api.demoAlerts().then((r) => r.ok && setDemos(demoChoices(r.data)));
+    void api.memoryOverview().then((r) => r.ok && setOverview(r.data));
     refreshLearning();
     return () => aborts.current.forEach((a) => a.abort());
   }, [refreshLearning]);
@@ -112,7 +190,7 @@ export default function Console({ memoryOn, refreshStats, projectId }: { memoryO
         });
       setRuns((prev) => ({
         ...prev,
-        [key]: { memory, steps: [], matched: [], recalled: [], diagnosis: null, error: null, running: true, startedAt: Date.now() },
+        [key]: { memory, steps: [], matched: [], recalled: [], diagnosis: null, error: null, running: true, startedAt: Date.now(), fix: null, unavailable: false },
       }));
       await streamDiagnosis(
         incidentId,
@@ -123,7 +201,8 @@ export default function Console({ memoryOn, refreshStats, projectId }: { memoryO
             update((r) => ({
               ...r,
               steps: [...r.steps, event.step],
-              ...(event.step.name === "recall" && isRecallData(data) ? { matched: data.matched, recalled: data.recalled } : {}),
+              ...(event.step.name === "recall" && isRecallData(data) ? { matched: data.matched, recalled: data.recalled, unavailable: data.unavailable === true } : {}),
+              ...(event.step.name === "evidence" && isEvidenceData(data) ? { fix: { worked: data.worked_fixes, failed: data.failed_fixes } } : {}),
             }));
           } else if (event.type === "diagnosis") {
             update((r) => ({ ...r, diagnosis: event.diagnosis, running: false }));
@@ -203,6 +282,7 @@ export default function Console({ memoryOn, refreshStats, projectId }: { memoryO
     setExperience(captured);
     setIncident((i) => (i ? { ...i, status: "resolved" } : i));
     setToast("Saved to memory. The next similar incident will know this.");
+    void api.memoryOverview().then((r) => r.ok && setOverview(r.data));
     refreshStats();
   }
 
@@ -211,12 +291,12 @@ export default function Console({ memoryOn, refreshStats, projectId }: { memoryO
   const bothDone = Boolean(runs.on?.diagnosis && runs.off?.diagnosis);
   const timelineRun = onRun ?? primary;
   const recallDone = Boolean(onRun?.steps.some((s) => s.name === "recall"));
-  const memoryState = onRun ? (recallDone ? "ready" : "searching") : memoryOn ? "idle" : "off";
+  const memoryState = onRun ? (onRun.unavailable ? "unavailable" : recallDone ? "ready" : "searching") : memoryOn ? "idle" : "off";
   const open = incident?.status === "open";
 
   return (
     <div className="flex h-full flex-col">
-      <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 overflow-y-auto p-3 lg:grid-cols-[300px_minmax(0,1fr)_360px] lg:overflow-hidden">
+      <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 overflow-y-auto p-4 lg:grid-cols-[330px_minmax(0,1fr)_360px] lg:overflow-hidden">
         <Panel title="Incident" icon={<Siren className="h-4 w-4 text-severity" aria-hidden="true" />}>
           <AlertInput
             draft={draft}
@@ -226,41 +306,52 @@ export default function Console({ memoryOn, refreshStats, projectId }: { memoryO
             onSubmit={(d) => void submit(d)}
             onNewIncident={newIncident}
             hasIncident={incident !== null}
+            simulateRequest={simulateRequest}
           />
           {createError && <p className="mt-3 text-xs text-severity">{createError}</p>}
         </Panel>
 
-        <div className="flex min-h-0 flex-col gap-3 lg:overflow-y-auto">
+        <div className="flex min-h-0 flex-col gap-4 lg:overflow-y-auto lg:pr-1">
           {!incident ? (
-            <div className="flex flex-1 flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-border p-10 text-center">
-              <Inbox className="h-8 w-8 text-muted" aria-hidden="true" />
-              <p className="text-sm text-ink">No active incident.</p>
-              <p className="max-w-md text-xs text-muted">
-                Pick a demo alert or paste your own, then Diagnose. The radio button next to a demo replays its monitoring signals
-                first, as if the pager just fired.
-              </p>
-            </div>
+            <ConsoleHero
+              overview={overview}
+              demos={demos}
+              memoryOn={memoryOn}
+              onDiagnose={(demo) => {
+                const next = { alertText: demo.alertText, service: demo.service, severity: demo.severity };
+                setDraft(next);
+                void submit(next);
+              }}
+              onSimulate={(demo) => setSimulateRequest({ choice: demo, nonce: Date.now() })}
+            />
           ) : (
             <>
-              <div className="glass flex flex-wrap items-center gap-2 px-4 py-3">
+              <div className="glass flex flex-wrap items-center gap-2.5 px-5 py-3.5">
                 <IncidentChip id={incident.id} tone={open ? "severity" : "success"} />
                 <SeverityBadge severity={incident.severity} />
                 <span className="font-mono text-xs text-muted">{incident.service}</span>
                 <span className="min-w-0 flex-1 truncate text-sm text-ink">{incident.title}</span>
-                <span className={`rounded px-1.5 py-0.5 text-[11px] ${open ? "bg-severity/10 text-severity" : "bg-success/10 text-success"}`}>
+                <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${open ? "bg-severity/10 text-severity" : "bg-success/10 text-success"}`}>
                   {incident.status}
                 </span>
               </div>
+
+              {timelineRun && (
+                <Lifecycle
+                  memoryOn={timelineRun.memory}
+                  steps={timelineRun.steps}
+                  running={timelineRun.running}
+                  diagnosis={timelineRun.diagnosis}
+                  retained={experience ? experience.memory_retained : null}
+                  matchedCount={timelineRun.matched.length}
+                />
+              )}
 
               <Panel title="Diagnosis" icon={<Activity className="h-4 w-4 text-memory" aria-hidden="true" />} className="shrink-0">
                 {primary?.error ? (
                   <div className="space-y-3">
                     <p className="text-sm text-severity">{primary.error}</p>
-                    <button
-                      type="button"
-                      onClick={() => void run(incident.id, primary.memory)}
-                      className="flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1 text-xs text-ink hover:border-memory/50"
-                    >
+                    <button type="button" onClick={() => void run(incident.id, primary.memory)} className="btn btn-secondary btn-sm">
                       <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" /> Retry
                     </button>
                   </div>
@@ -278,17 +369,23 @@ export default function Console({ memoryOn, refreshStats, projectId }: { memoryO
                     <ImpactRow off={runs.off.diagnosis} on={runs.on.diagnosis} />
                   </div>
                 ) : primary?.diagnosis ? (
-                  <DiagnosisCard
+                  <ConsoleDiagnosis
                     diagnosis={primary.diagnosis}
                     recorded={primary.diagnosis.try_first ? recorded[primary.diagnosis.try_first.action] ?? null : null}
                     onOutcome={open && primary.diagnosis.memory_enabled ? (action, outcome) => void logAttempt(action, outcome) : undefined}
                   />
                 ) : (
-                  <div className="space-y-2">
-                    <div className="h-4 w-2/3 animate-pulse rounded bg-border" />
-                    <div className="h-4 w-1/2 animate-pulse rounded bg-border" />
-                    <p className="pt-1 text-xs text-muted">
-                      {primary?.memory === false ? "Asking the model without memory..." : "The diagnosis appears when the investigation below finishes."}
+                  <div className="space-y-4">
+                    {primary?.memory && primary.fix && primary.matched.length > 0 ? (
+                      <FixHistory matched={primary.matched} worked={primary.fix.worked} failed={primary.fix.failed} final={false} strong={false} />
+                    ) : (
+                      <div className="space-y-2">
+                        <div className="h-4 w-2/3 animate-pulse rounded-full bg-white/[0.07]" />
+                        <div className="h-4 w-1/2 animate-pulse rounded-full bg-white/[0.07]" />
+                      </div>
+                    )}
+                    <p className="text-xs text-muted">
+                      {primary?.memory === false ? "Asking the model without memory..." : "The verified diagnosis appears when the investigation below finishes."}
                     </p>
                   </div>
                 )}
@@ -297,7 +394,7 @@ export default function Console({ memoryOn, refreshStats, projectId }: { memoryO
                 )}
               </Panel>
 
-              {timelineRun && (
+              {timelineRun && (timelineRun.running || timelineRun.error) && (
                 <Panel title="Investigation" icon={<ListTree className="h-4 w-4 text-memory" aria-hidden="true" />} className="shrink-0">
                   <InvestigationTimeline
                     memory={timelineRun.memory}
@@ -321,25 +418,24 @@ export default function Console({ memoryOn, refreshStats, projectId }: { memoryO
           )}
         </div>
 
-        <Panel title="Why I think this" icon={<BrainCircuit className="h-4 w-4 text-memory" aria-hidden="true" />}>
-          <MemoryPanel
-            state={memoryState}
-            matched={onRun?.matched ?? []}
-            recalled={onRun?.recalled ?? []}
-            cited={onRun?.diagnosis?.cited_incidents ?? []}
-          />
+        <Panel title={incident ? "Why I think this" : "Team memory"} icon={<BrainCircuit className="h-4 w-4 text-memory" aria-hidden="true" />}>
+          {memoryState === "idle" || memoryState === "off" ? (
+            <MemorySnapshot overview={overview} memoryOn={memoryOn} />
+          ) : (
+            <MemoryPanel
+              state={memoryState}
+              matched={onRun?.matched ?? []}
+              recalled={onRun?.recalled ?? []}
+              cited={onRun?.diagnosis?.cited_incidents ?? []}
+            />
+          )}
         </Panel>
       </div>
 
-      <footer className="glass-bar flex shrink-0 items-center gap-4 border-t border-border px-4 py-2.5">
+      <footer className="glass-bar flex shrink-0 items-center gap-4 border-t border-white/[0.07] px-5 py-3">
         <LearningCurve points={learning} />
-        <button
-          type="button"
-          disabled={!incident || !open || running}
-          onClick={() => setResolveOpen(true)}
-          className="flex shrink-0 items-center gap-2 rounded-md border border-success/50 px-3 py-2 text-sm text-success hover:bg-success/10 disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          <CheckCheck className="h-4 w-4" aria-hidden="true" /> Resolve incident
+        <button type="button" disabled={!incident || !open || running} onClick={() => setResolveOpen(true)} className="btn btn-primary btn-lg shrink-0">
+          <CheckCheck className="h-4 w-4" aria-hidden="true" /> Resolve and learn
         </button>
       </footer>
 

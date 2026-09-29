@@ -2,8 +2,10 @@
 import type {
   ApiError,
   ApiResult,
+  AskAnswer,
   AttemptLogged,
   DemoAlert,
+  Diagnosis,
   ExperienceCaptured,
   IncidentCreated,
   IncidentDetail,
@@ -18,6 +20,7 @@ import type {
   PatternsResponse,
   PostmortemDraft,
   ResolveRequest,
+  SeedResult,
   StreamEvent,
 } from "./types";
 
@@ -74,6 +77,8 @@ export const api = {
   projectContext: (id: number) => request<ProjectContext>(`/api/projects/${id}/context`),
   memoryEvents: (limit = 30) => request<MemoryEvent[]>(`/api/memory/events?limit=${limit}`),
   memoryOverview: () => request<MemoryOverview>("/api/memory/overview"),
+  ask: (question: string) => post<AskAnswer>("/api/memory/ask", { question }),
+  seedMemory: () => post<SeedResult>("/api/memory/seed"),
   resetDemo: () => post<{ memories: number; live_incidents_removed: number; log: string[] }>("/api/demo/reset", { confirm: "reset" }),
   readScreen: (imageDataUrl: string) =>
     post<{ found: boolean; summary: string; text: string; model: string }>("/api/context/screen", { image_data_url: imageDataUrl }),
@@ -83,6 +88,24 @@ export const api = {
   resolve: (id: string, payload: ResolveRequest) =>
     post<ExperienceCaptured>(`/api/incidents/${encodeURIComponent(id)}/resolve`, payload),
 };
+
+/** Fields added in later backend versions default to empty, so an older backend degrades instead of crashing views. */
+function withDiagnosisDefaults(d: Diagnosis): Diagnosis {
+  return {
+    ...d,
+    hypotheses: d.hypotheses ?? [],
+    avoid: d.avoid ?? [],
+    cited_incidents: d.cited_incidents ?? [],
+    matched: (d.matched ?? []).map((m) => ({ ...m, learned_live: m.learned_live ?? false })),
+    recalled: d.recalled ?? [],
+    steps: d.steps ?? [],
+    findings: d.findings ?? [],
+    unknowns: d.unknowns ?? [],
+    worked_fixes: d.worked_fixes ?? [],
+    failed_fixes: d.failed_fixes ?? [],
+    memory_unavailable: d.memory_unavailable ?? false,
+  };
+}
 
 /**
  * Streams the investigation as NDJSON events. Every failure is delivered as an "error" event,
@@ -123,6 +146,7 @@ export async function streamDiagnosis(
         buffer = buffer.slice(newline + 1);
         if (line) {
           const event = JSON.parse(line) as StreamEvent;
+          if (event.type === "diagnosis") event.diagnosis = withDiagnosisDefaults(event.diagnosis);
           if (event.type !== "step") finished = true;
           onEvent(event);
         }

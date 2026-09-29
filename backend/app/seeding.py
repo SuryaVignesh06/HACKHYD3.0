@@ -31,6 +31,25 @@ async def seed(memory: MemoryService, log: Callable[[str], None] = print) -> int
     return total
 
 
+async def seed_missing(memory: MemoryService, log: Callable[[str], None] = print) -> dict[str, int]:
+    """Retain only the historical postmortems whose incident ID is not in the bank yet, so seeding never duplicates."""
+    await memory.ensure_bank()
+    existing = await memory.document_ids()
+    items = [postmortem_item(incident, postmortem) for incident, postmortem in load_history()]
+    missing = [item for item in items if item["document_id"] not in existing]
+    skipped = len(items) - len(missing)
+    log(f"Bank {memory.bank_id}: {skipped} of {len(items)} historical incidents already in memory.")
+    started = time.perf_counter()
+    created = 0
+    for start in range(0, len(missing), BATCH_SIZE):
+        batch = missing[start:start + BATCH_SIZE]
+        await memory.retain_postmortem_batch(batch)
+        created += len(batch)
+        log(f"  retained {batch[0]['document_id']}..{batch[-1]['document_id']} ({time.perf_counter() - started:.0f}s elapsed)")
+    log(f"Seed done: {created} created, {skipped} skipped.")
+    return {"created": created, "skipped": skipped}
+
+
 def reset_demo_project() -> None:
     """payments-api config back to the demo starting state, and simulator logs cleared."""
     text = DEMO_VALUES.read_text(encoding="utf-8")

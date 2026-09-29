@@ -41,6 +41,7 @@ from app.services.evidence import (
     attempt_index,
     cite_candidates,
     confirm_precedent,
+    fix_records,
     is_strong_match,
     matched_incidents,
     parse_alert,
@@ -52,7 +53,7 @@ from app.services.llm import LLMService, LLMUnavailable
 from app.services.memory import MemoryService, MemoryUnavailable
 from app.services.project_context import ProjectAccessError, find_findings, validate_root
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("oncall.agent")
 
 MAX_RECALLED_IN_PAYLOAD = 20
 Event = dict[str, Any]
@@ -75,7 +76,8 @@ async def _timed(coro: Any) -> tuple[Any, int]:
 
 def _known_incidents(session: Session) -> dict[str, KnownIncident]:
     return {
-        row.id: KnownIncident(title=row.title, service=row.service, occurred_at=from_db_time(row.created_at))
+        row.id: KnownIncident(title=row.title, service=row.service, occurred_at=from_db_time(row.created_at),
+                              live=row.source == "live" and row.status == "resolved")
         for row in session.exec(select(IncidentRow)).all()
     }
 
@@ -117,8 +119,8 @@ def _final(session: Session, incident_id: str, diagnosis: Diagnosis) -> Event:
 
 
 async def _baseline(incident: IncidentRow, parsed: ParsedAlert, llm: LLMService, steps: list[InvestigationStep],
-                    started: float) -> tuple[Event, Diagnosis]:
-    """Memory off: the alert alone goes to the LLM, and any incident ID it produces is stripped."""
+                    started: float, memory_unavailable: bool = False) -> tuple[Event, Diagnosis]:
+    """Memory off (or Hindsight down): the alert alone goes to the LLM, and any incident ID it produces is stripped."""
     llm_started = time.perf_counter()
     try:
         draft, model = await llm.baseline_diagnosis(incident.alert_text, parsed.service)
@@ -129,19 +131,21 @@ async def _baseline(incident: IncidentRow, parsed: ParsedAlert, llm: LLMService,
             try_first=FixSuggestion(action=strip_incident_ids(draft.try_first.action)) if draft.try_first else None,
             avoid=[AvoidFix(action=strip_incident_ids(a.action), why=strip_incident_ids(a.why)) for a in draft.avoid],
             memory_enabled=False,
+            memory_unavailable=memory_unavailable,
             latency_ms=0,
         )
         detail = f"Generic answer from {model.split('/')[-1]}, no memory used"
     except LLMUnavailable:
         diagnosis = Diagnosis(
             summary="The language model is unavailable right now, so no generic answer could be produced.",
-            memory_enabled=False, degraded=True, latency_ms=0,
+            memory_enabled=False, memory_unavailable=memory_unavailable, degraded=True, latency_ms=0,
         )
         detail = "Language model unavailable"
     step, event = _step("diagnosis", detail, _ms(llm_started))
     steps.append(step)
     diagnosis.steps = steps
     diagnosis.latency_ms = _ms(started)
+    logger.info("[DIAGNOSIS] %s context-only answer (%s)", incident.id, detail)
     return event, diagnosis
 
 
@@ -161,6 +165,8 @@ async def run_investigation(incident_id: str, memory_enabled: bool, memory: Memo
                             _ms(parse_started), {"service": parsed.service, "severity": parsed.severity,
                                                  "signature": parsed.signature})
         steps.append(step)
+        logger.info("[CONTEXT] %s service=%s severity=%s signature=%r", incident_id, parsed.service, parsed.severity,
+                    parsed.signature)
         yield event
 
         if not memory_enabled:
@@ -172,12 +178,22 @@ async def run_investigation(incident_id: str, memory_enabled: bool, memory: Memo
         reflect_task = asyncio.create_task(_timed(memory.reflect_diagnosis(incident.alert_text, parsed.service, budget="low")))
 
         # ------------------------------------------------ recall
+        logger.info("[RECALL] %s query: %s: %s", incident_id, parsed.service, parsed.signature)
+        recall_started = time.perf_counter()
         try:
             recalled_all, recall_ms = await _timed(memory.recall_similar(incident.alert_text, parsed.service))
-        except MemoryUnavailable as exc:
+        except MemoryUnavailable:
+            # Never fabricate recall: say Hindsight is unavailable and answer from the current context only.
             reflect_task.cancel()
             record_event("recall", f"{parsed.service}: {parsed.signature}", False, None, incident_id)
-            yield {"type": "error", "error": "memory_unavailable", "message": str(exc)}
+            logger.warning("[RECALL] %s Hindsight unavailable; falling back to a context-only diagnosis", incident_id)
+            step, event = _step("recall", "Hindsight unavailable; nothing was recalled, so this answer uses the current context only",
+                                _ms(recall_started), {"matched": [], "recalled": [], "unavailable": True})
+            steps.append(step)
+            yield event
+            event, fallback = await _baseline(incident, parsed, llm, steps, started, memory_unavailable=True)
+            yield event
+            yield _final(session, incident_id, fallback)
             return
         record_event("recall", f"{parsed.service}: {parsed.signature}", True, len(recalled_all), incident_id)
         others = [m for m in recalled_all if m.incident_id != incident_id]
@@ -190,6 +206,8 @@ async def run_investigation(incident_id: str, memory_enabled: bool, memory: Memo
                       f"most relevant {best.id} at {best.relevance:.0%}")
         else:
             detail = f"{len(recalled_all)} memories, no related incidents"
+        logger.info("[RECALL] %s retrieved %d memories, %d related incidents%s", incident_id, len(recalled_all),
+                    len(matched), f" (best {matched[0].id} {matched[0].relevance:.0%})" if matched else "")
         step, event = _step("recall", detail, recall_ms, {
             "matched": [m.model_dump(mode="json") for m in matched],
             "recalled": [m.model_dump(mode="json") for m in recalled],
@@ -202,13 +220,22 @@ async def run_investigation(incident_id: str, memory_enabled: bool, memory: Memo
         attempts = _attempts_for(session, [m.id for m in matched])
         worked = sum(1 for items in attempts.values() for a in items if a.outcome == "worked")
         failed = sum(1 for items in attempts.values() for a in items if a.outcome == "failed")
+        candidates = cite_candidates(matched)
+        # The fix history shown while reflect runs: only incidents relevant enough to ever be cited.
+        worked_fixes, failed_fixes = fix_records(attempts, [m.id for m in matched if m.id in candidates])
+        logger.info("[REFLECT] %s fix log of %d incidents: %d worked, %d failed; relevant successful fixes: %d, "
+                    "relevant failed approaches: %d", incident_id, len(matched), worked, failed, len(worked_fixes),
+                    len(failed_fixes))
         step, event = _step("evidence", f"Checked the fix log of {len(matched)} incidents: {worked} fixes worked, {failed} failed",
-                            _ms(evidence_started), {"worked": worked, "failed": failed})
+                            _ms(evidence_started), {
+                                "worked": worked, "failed": failed,
+                                "worked_fixes": [r.model_dump(mode="json") for r in worked_fixes],
+                                "failed_fixes": [r.model_dump(mode="json") for r in failed_fixes],
+                            })
         steps.append(step)
         yield event
 
         # ------------------------------------------------ inspect the authorized project
-        candidates = cite_candidates(matched)
         inspect_started = time.perf_counter()
         project = session.get(ProjectRow, incident.project_id) if incident.project_id else None
         findings: list[CodeFinding] = []
@@ -224,6 +251,7 @@ async def run_investigation(incident_id: str, memory_enabled: bool, memory: Memo
                           f"Inspected {project.name}: none of the settings that past fixes changed appear in it")
             except ProjectAccessError as exc:
                 detail = f"Could not read {project.name}: {exc}"
+        logger.info("[PROJECT SEARCH] %s %s", incident_id, detail)
         step, event = _step("inspect", detail, _ms(inspect_started),
                             {"findings": [f.model_dump(mode="json") for f in findings]})
         steps.append(step)
@@ -244,6 +272,7 @@ async def run_investigation(incident_id: str, memory_enabled: bool, memory: Memo
             reflect_text, reflect_ms, hindsight_strong, hindsight_ids = "", _ms(started), None, []
             detail = "Hindsight reflect unavailable; continuing with recall and the fix log"
         record_event("reflect", detail, hindsight_strong is not None or bool(reflect_text), None, incident_id)
+        logger.info("[REFLECT] %s %s (%d ms)", incident_id, detail, reflect_ms)
         step, event = _step("reflect", detail, reflect_ms, {"hindsight_strong": hindsight_strong,
                                                             "hindsight_ids": hindsight_ids})
         steps.append(step)
@@ -273,6 +302,8 @@ async def run_investigation(incident_id: str, memory_enabled: bool, memory: Memo
                 findings=[f for f in findings if set(f.related_incidents) & citable],
                 unknowns=[u for u in (scrub_unverified(u, set(claims.cited_incidents)) for u in draft.unknowns) if u],
                 project=project.name if project else None,
+                worked_fixes=[r for r in worked_fixes if r.incident_id in citable],
+                failed_fixes=[r for r in failed_fixes if r.incident_id in citable],
                 strong_match=strong,
                 memory_enabled=True,
                 latency_ms=0,
@@ -287,6 +318,8 @@ async def run_investigation(incident_id: str, memory_enabled: bool, memory: Memo
                 recalled=recalled,
                 findings=findings if strong else [],
                 project=project.name if project else None,
+                worked_fixes=worked_fixes if strong else [],
+                failed_fixes=failed_fixes if strong else [],
                 strong_match=strong,
                 memory_enabled=True,
                 degraded=True,
@@ -299,6 +332,9 @@ async def run_investigation(incident_id: str, memory_enabled: bool, memory: Memo
 
         diagnosis.steps = steps
         diagnosis.latency_ms = _ms(started)
+        logger.info("[DIAGNOSIS] %s %s; try first: %s; avoid: %d; findings: %s", incident_id, detail,
+                    diagnosis.try_first.action if diagnosis.try_first else "none", len(diagnosis.avoid),
+                    ", ".join(f"{f.path}:{f.line}" for f in diagnosis.findings) or "none")
         final = _final(session, incident_id, diagnosis)
         # The alert is retained (asynchronously on the Hindsight side) after the first memory-on
         # investigation, not at creation, so the incident never recalls or reflects on itself.
@@ -321,8 +357,10 @@ async def _retain_alert_once(session: Session, incident: IncidentRow, memory: Me
         ))
     except MemoryUnavailable:
         record_event("retain", f"alert for {incident.id}", False, None, incident.id)
+        logger.warning("[RETAIN] alert for %s failed: Hindsight unavailable", incident.id)
         return False
     record_event("retain", f"alert for {incident.id} (background)", True, 1, incident.id)
+    logger.info("[RETAIN] alert for %s queued in Hindsight", incident.id)
     return True
 
 

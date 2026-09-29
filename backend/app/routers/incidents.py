@@ -1,6 +1,7 @@
 """Incident, diagnosis, memory-stats, demo-alert and learning-curve endpoints."""
 
 import json
+import logging
 import re
 from collections.abc import AsyncIterator
 from typing import Any
@@ -9,6 +10,7 @@ from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from sqlmodel import Session, select
 
+from app.config import get_settings
 from app.dataset import load_demo_alerts
 from app.db import from_db_time, get_session, record_event, to_db_time, utc_now
 from app.models import (
@@ -41,6 +43,7 @@ from app.services.memory import MemoryService, MemoryUnavailable, format_postmor
 from app.services.redaction import redact
 
 router = APIRouter(prefix="/api")
+logger = logging.getLogger("oncall.agent")
 
 ALERT_NAME = re.compile(r"^\s*\[[A-Z]+\]\s*([A-Za-z0-9_.-]+)")
 
@@ -115,6 +118,7 @@ async def create_incident(body: IncidentCreate, session: Session = Depends(get_s
     session.add(row)
     session.commit()
     session.refresh(row)
+    logger.info("[CONTEXT] %s created from %s (%s, %s): %s", row.id, row.origin, row.service, row.severity, row.title)
     # The alert is retained into Hindsight at the end of the first memory-on investigation
     # (services/diagnosis.py), so the incident never matches itself during that investigation.
     return IncidentCreated(**summary_of(row).model_dump(), alert_text=row.alert_text)
@@ -170,11 +174,14 @@ async def log_attempt(incident_id: str, body: AttemptCreate, session: Session = 
     session.add(row)
     session.commit()
     session.refresh(row)
+    logger.info("[USER ACTION] %s tried: %s", incident_id, row.action[:160])
+    logger.info("[OUTCOME] %s %s%s", incident_id, row.outcome, f" ({row.notes[:120]})" if row.notes else "")
     try:
         await memory.retain_attempt(facts_of(incident), attempt_facts([row])[0])
         retained = True
     except MemoryUnavailable:
         retained = False
+    logger.info("[RETAIN] fix attempt on %s %s", incident_id, "queued in Hindsight" if retained else "failed: Hindsight unavailable")
     record_event("retain", f"fix attempt on {incident_id}: {row.action[:120]} ({row.outcome})", retained,
                  1 if retained else None, incident_id)
     return AttemptLogged(id=row.id or 0, action=row.action, outcome=row.outcome, notes=row.notes,
@@ -229,9 +236,10 @@ async def resolve(incident_id: str, body: ResolveRequest, session: Session = Dep
     incident.ttr_minutes = ttr
     # The resolved incident joins the failure family of its confirmed precedent, which the Memory page groups by.
     diagnosis = latest_memory_diagnosis(session, incident_id)
-    if diagnosis and diagnosis.strong_match and diagnosis.cited_incidents and incident.family is None:
-        precedent = session.get(IncidentRow, diagnosis.cited_incidents[0])
-        incident.family = precedent.family if precedent else None
+    if diagnosis and diagnosis.strong_match and incident.family is None:
+        # The most relevant cited precedent that belongs to a family; open live incidents have none yet.
+        precedents = (session.get(IncidentRow, iid) for iid in diagnosis.cited_incidents)
+        incident.family = next((p.family for p in precedents if p is not None and p.family), None)
     session.add(incident)
     session.commit()
     session.refresh(incident)
@@ -239,6 +247,7 @@ async def resolve(incident_id: str, body: ResolveRequest, session: Session = Dep
     facts = facts_of(incident).model_copy(update={"started_at": started})
     postmortem = PostmortemFacts(summary=body.summary, root_cause=body.root_cause, fix=body.fix,
                                  follow_ups=body.follow_ups, ttr_minutes=ttr, attempts=attempts)
+    logger.info("[OUTCOME] %s resolved: %s", incident_id, body.fix[:160])
     if not body.retain:
         return ExperienceCaptured(
             incident_id=incident_id, pattern=body.root_cause,
@@ -257,6 +266,8 @@ async def resolve(incident_id: str, body: ResolveRequest, session: Session = Dep
         retained_text, retained = redact(format_postmortem_memory(facts, postmortem)), False
     record_event("retain", f"postmortem for {incident_id}: {body.root_cause[:120]}", retained, 1 if retained else None,
                  incident_id)
+    logger.info("[RETAIN] postmortem for %s %s", incident_id,
+                "stored successfully; the next similar incident can recall it" if retained else "failed: Hindsight unavailable")
     try:
         after: int | None = await memory.memory_count()
     except MemoryUnavailable:
@@ -304,9 +315,11 @@ async def get_incident(incident_id: str, session: Session = Depends(get_session)
 async def memory_stats(memory: MemoryService = Depends(get_memory)) -> MemoryStats:
     try:
         return MemoryStats(bank_id=memory.bank_id, memory_count=await memory.memory_count(),
-                           observation_count=await memory.observation_count(), available=True)
+                           observation_count=await memory.observation_count(), available=True,
+                           demo_tools=get_settings().DEMO_TOOLS)
     except MemoryUnavailable:
-        return MemoryStats(bank_id=memory.bank_id, memory_count=None, observation_count=None, available=False)
+        return MemoryStats(bank_id=memory.bank_id, memory_count=None, observation_count=None, available=False,
+                           demo_tools=get_settings().DEMO_TOOLS)
 
 
 @router.get("/demo-alerts")

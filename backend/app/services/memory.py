@@ -282,7 +282,7 @@ class MemoryService:
         try:
             response = await self.client.arecall(
                 self.bank_id,
-                query=f"{service}: {alert_text}",
+                query=f"{service}: {alert_text}" if service else alert_text,
                 types=RECALL_TYPES,
                 budget="mid",
                 max_tokens=4096,
@@ -329,6 +329,22 @@ class MemoryService:
             for item in response.items
             if item.text and (item.state in (None, "valid"))
         ]
+
+    async def document_ids(self) -> set[str]:
+        """Every document ID in the bank (one per incident), used to seed without duplicating."""
+        ids: set[str] = set()
+        offset = 0
+        try:
+            while True:
+                page = await self.client.documents.list_documents(self.bank_id, limit=200, offset=offset)
+                ids.update(item.id for item in page.items)
+                offset += len(page.items)
+                if not page.items or offset >= page.total:
+                    return ids
+        except Exception as exc:
+            if "404" in str(exc) or "not found" in str(exc).lower():
+                return ids  # the bank does not exist yet, so nothing is seeded
+            raise _unavailable("list_documents", exc) from exc
 
     async def memory_count(self) -> int:
         try:

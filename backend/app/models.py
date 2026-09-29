@@ -155,6 +155,16 @@ class MatchedIncident(BaseModel):
     service: str | None = None
     relevance: float
     occurred_at: datetime | None = None
+    learned_live: bool = False  # resolved in this app (not seeded history), so the agent learned it itself
+
+
+class FixRecord(BaseModel):
+    """One recorded fix attempt of a recalled incident, read from the attempts table (the mirror of what was retained)."""
+
+    action: str
+    incident_id: str
+    outcome: Outcome
+    notes: str | None = None
 
 
 class InvestigationStep(BaseModel):
@@ -195,8 +205,11 @@ class Diagnosis(BaseModel):
     findings: list[CodeFinding] = PydanticField(default_factory=list)
     unknowns: list[str] = PydanticField(default_factory=list)
     project: str | None = None
+    worked_fixes: list[FixRecord] = PydanticField(default_factory=list)  # from citable recalled incidents only
+    failed_fixes: list[FixRecord] = PydanticField(default_factory=list)
     strong_match: bool = False
     memory_enabled: bool
+    memory_unavailable: bool = False  # memory was requested but Hindsight could not be reached
     degraded: bool = False
     latency_ms: int
 
@@ -391,6 +404,16 @@ class MemoryStats(BaseModel):
     memory_count: int | None
     observation_count: int | None
     available: bool
+    demo_tools: bool = False  # Seed and Reset buttons; disabled with DEMO_TOOLS=false in production
+
+
+class SeedResult(BaseModel):
+    status: Literal["success", "already_seeded"]
+    bank: str
+    created: int
+    skipped: int
+    memory_count: int | None
+    log: list[str]
 
 
 class LearningPoint(BaseModel):
@@ -403,6 +426,34 @@ class LearningPoint(BaseModel):
     degraded: bool
     latency_ms: int
     created_at: datetime
+
+
+class AskRequest(BaseModel):
+    question: str = PydanticField(min_length=3, max_length=2000)
+
+
+class PastIncident(BaseModel):
+    """A past incident Hindsight recall returned, with its recorded outcomes from the fix log."""
+
+    id: str
+    title: str
+    service: str
+    occurred_at: datetime | None
+    relevance: float | None
+    learned_live: bool
+    root_cause: str | None
+    fix: str | None
+    worked: list[str]
+    failed: list[str]
+
+
+class AskAnswer(BaseModel):
+    question: str
+    answer: str
+    incidents: list[PastIncident]
+    recalled_count: int
+    memory_unavailable: bool
+    latency_ms: int
 
 
 class ApiError(BaseModel):

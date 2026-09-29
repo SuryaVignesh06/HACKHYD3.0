@@ -12,67 +12,86 @@ import {
   Network,
   RotateCcw,
   Server,
+  Sparkles,
+  DatabaseZap,
   TriangleAlert,
 } from "lucide-react";
 import { IncidentChip } from "../components/IncidentPeek";
+import { Stat } from "../components/ui";
 import { api } from "../lib/api";
 import { dateTime, dateWithAge, shortDate } from "../lib/format";
 import type { ApiError, FamilyNode, FixOutcome, MemoryEvent, MemoryOverview, ServiceNode } from "../lib/types";
 
 type Selection = { kind: "service"; service: string } | { kind: "family"; service: string; family: string };
 
-function ResetDemo() {
-  const [stage, setStage] = useState<"idle" | "confirm" | "running" | "done" | "error">("idle");
+/** Development tools. The backend refuses both when DEMO_TOOLS=false, and the buttons are hidden then too. */
+function DemoTools({ onChanged }: { onChanged: () => void }) {
+  const [stage, setStage] = useState<"idle" | "confirm" | "seeding" | "resetting" | "done" | "error">("idle");
   const [message, setMessage] = useState("");
 
-  async function run() {
-    setStage("running");
-    const result = await api.resetDemo();
+  async function seed() {
+    setStage("seeding");
+    const result = await api.seedMemory();
     if (result.ok) {
+      const r = result.data;
       setStage("done");
-      setMessage(`Reset complete: ${result.data.memories} memories reseeded, ${result.data.live_incidents_removed} live incidents removed. Reload to see the fresh state.`);
+      setMessage(
+        r.status === "already_seeded"
+          ? `Already seeded: all ${r.skipped} historical incidents are in ${r.bank}. Nothing was duplicated.`
+          : `Seeded ${r.bank}: ${r.created} experiences created, ${r.skipped} already present${r.memory_count !== null ? `; the bank now holds ${r.memory_count} memories` : ""}.`,
+      );
+      onChanged();
     } else {
       setStage("error");
       setMessage(result.error.message);
     }
   }
 
-  return (
-    <div className="flex flex-wrap items-center gap-3 text-xs">
-      {stage === "idle" && (
-        <button type="button" onClick={() => setStage("confirm")} className="flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-muted hover:text-ink">
-          <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" /> Reset demo
-        </button>
-      )}
-      {stage === "confirm" && (
-        <>
-          <span className="text-ink">
-            This removes incidents created during the demo, reseeds Hindsight with the 45 historical incidents (about a minute) and restores the demo project config.
-            Connected projects are kept.
-          </span>
-          <button type="button" onClick={() => void run()} className="rounded-md border border-severity/50 px-2.5 py-1.5 text-severity hover:bg-severity/10">
-            Reset
-          </button>
-          <button type="button" onClick={() => setStage("idle")} className="rounded-md border border-border px-2.5 py-1.5 text-muted hover:text-ink">
-            Cancel
-          </button>
-        </>
-      )}
-      {stage === "running" && (
-        <span className="flex items-center gap-2 text-memory">
-          <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> Reseeding Hindsight memory...
-        </span>
-      )}
-      {(stage === "done" || stage === "error") && <span className={stage === "done" ? "text-success" : "text-severity"}>{message}</span>}
-    </div>
-  );
-}
+  async function reset() {
+    setStage("resetting");
+    const result = await api.resetDemo();
+    if (result.ok) {
+      setStage("done");
+      setMessage(`Reset complete: ${result.data.memories} memories reseeded, ${result.data.live_incidents_removed} live incidents removed. Reload to see the fresh state.`);
+      onChanged();
+    } else {
+      setStage("error");
+      setMessage(result.error.message);
+    }
+  }
 
-function Tile({ label, value, tone = "text-ink" }: { label: string; value: string | number; tone?: string }) {
+  const busy = stage === "seeding" || stage === "resetting";
   return (
-    <div className="glass px-4 py-3">
-      <p className="text-[11px] text-muted">{label}</p>
-      <p className={`mt-0.5 font-mono text-xl ${tone}`}>{value}</p>
+    <div className="flex max-w-xl flex-col items-end gap-2 text-xs">
+      <div className="flex flex-wrap justify-end gap-2">
+        <button type="button" disabled={busy} onClick={() => void seed()} className="btn btn-primary">
+          {stage === "seeding" ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : <DatabaseZap className="h-3.5 w-3.5" aria-hidden="true" />}
+          {stage === "seeding" ? "Seeding Hindsight..." : "Seed engineering memory"}
+        </button>
+        {stage === "confirm" ? (
+          <>
+            <button type="button" onClick={() => void reset()} className="btn btn-danger">
+              Confirm reset
+            </button>
+            <button type="button" onClick={() => setStage("idle")} className="btn btn-ghost">
+              Cancel
+            </button>
+          </>
+        ) : (
+          <button type="button" disabled={busy} onClick={() => setStage("confirm")} className="btn btn-secondary">
+            {stage === "resetting" ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />}
+            {stage === "resetting" ? "Resetting..." : "Reset demo memory"}
+          </button>
+        )}
+      </div>
+      {stage === "confirm" && (
+        <p className="text-right text-muted">
+          Deletes and reseeds the Hindsight bank with the 45 historical incidents (about a minute), removes incidents created during the demo and restores the demo
+          project config. Connected projects are kept.
+        </p>
+      )}
+      {(stage === "done" || stage === "error") && <p className={`text-right ${stage === "done" ? "text-success" : "text-severity"}`}>{message}</p>}
+      <p className="text-[10px] uppercase tracking-[0.08em] text-muted/70">Development tools</p>
     </div>
   );
 }
@@ -231,7 +250,7 @@ function ServiceDetail({ node }: { node: ServiceNode }) {
   );
 }
 
-export default function Memory() {
+export default function Memory({ demoTools, onChanged }: { demoTools: boolean; onChanged: () => void }) {
   const [data, setData] = useState<MemoryOverview | null>(null);
   const [events, setEvents] = useState<MemoryEvent[]>([]);
   const [error, setError] = useState<ApiError | null>(null);
@@ -262,35 +281,59 @@ export default function Memory() {
   const t = data.totals;
 
   return (
-    <div className="h-full overflow-y-auto p-5">
-      <div className="mx-auto max-w-6xl space-y-5">
-        <div className="flex flex-wrap items-start justify-between gap-3">
+    <div className="h-full overflow-y-auto px-6 py-7">
+      <div className="mx-auto max-w-6xl space-y-6">
+        <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <h1 className="flex items-center gap-2 text-sm font-semibold">
-              <Network className="h-4 w-4 text-memory" aria-hidden="true" /> Engineering memory: Nimbus Pay
-            </h1>
-            <p className="mt-1 text-xs text-muted">What the team has learned, grouped by service and recurring failure. Every number comes from recorded incidents.</p>
+            <p className="eyebrow flex items-center gap-1.5 !text-memory">
+              <Network className="h-3.5 w-3.5" aria-hidden="true" /> Engineering memory
+            </p>
+            <h1 className="mt-1 text-2xl font-semibold">Nimbus Pay</h1>
+            <p className="mt-1 max-w-xl text-sm text-muted">What the team has learned, grouped by service and recurring failure. Every number comes from recorded incidents and the Hindsight bank.</p>
           </div>
-          <ResetDemo />
+          {demoTools && <DemoTools onChanged={onChanged} />}
         </div>
 
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-7">
-          <Tile label="Incidents learned" value={t.incidents_learned} />
-          <Tile label="Fix outcomes recorded" value={t.fix_attempts} />
-          <Tile label="Worked" value={t.worked} tone="text-success" />
-          <Tile label="Failed" value={t.failed} tone="text-severity" />
-          <Tile label="Recurring patterns" value={t.families} />
-          <Tile label="Learned live" value={t.live_incidents_learned} tone="text-memory" />
-          <Tile label="Hindsight memories" value={t.hindsight_memories ?? "n/a"} tone="text-memory" />
-        </div>
+        <section className="glass grid grid-cols-2 gap-x-6 gap-y-5 p-6 sm:grid-cols-4 xl:grid-cols-7">
+          <Stat label="Experiences" value={t.incidents_learned} hint="Resolved incidents retained as engineering experience" />
+          <Stat label="Incident families" value={t.families} />
+          <Stat label="Successful fixes" value={t.worked} tone="text-success" />
+          <Stat label="Failed approaches" value={t.failed} tone="text-severity" />
+          <Stat label="Outcomes recorded" value={t.fix_attempts} />
+          <Stat label="Learned live" value={t.live_incidents_learned} tone="text-memory" />
+          <Stat label="Hindsight memories" value={t.hindsight_memories ?? "n/a"} tone="text-memory" hint="Memory units in the bank, from Hindsight" />
+        </section>
 
-        <section className="glass p-4">
-          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">Experience growth: incidents learned</p>
+        <section className="glass p-5">
+          <p className="eyebrow mb-3 flex items-center gap-1.5">
+            <Sparkles className="h-3.5 w-3.5 text-memory" aria-hidden="true" /> Recently learned experiences
+          </p>
+          {(data.recent_learned ?? []).length === 0 ? (
+            <p className="text-sm text-muted">None yet. Resolve an incident with "Resolve and learn" and it appears here.</p>
+          ) : (
+            <ul className="divide-y divide-white/[0.06]">
+              {(data.recent_learned ?? []).map((e) => (
+                <li key={e.id} className="flex flex-wrap items-center gap-3 py-2.5 text-sm">
+                  <IncidentChip id={e.id} />
+                  <span className="min-w-0 flex-1 truncate text-ink" title={e.root_cause ?? undefined}>
+                    {e.root_cause ?? e.title}
+                  </span>
+                  <span className="text-xs text-success">{e.worked} worked</span>
+                  <span className="text-xs text-severity">{e.failed} failed</span>
+                  <span className="text-xs text-muted">{e.resolved_at ? dateWithAge(e.resolved_at) : ""}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+
+        <section className="glass p-5">
+          <p className="eyebrow mb-2">Experience growth: incidents learned</p>
           <GrowthChart points={data.growth} />
         </section>
 
         <div className="grid gap-4 lg:grid-cols-[300px_minmax(0,1fr)]">
-          <section className="glass p-3">
+          <section className="glass p-4">
             <p className="mb-2 flex items-center gap-1.5 px-1 text-xs font-semibold uppercase tracking-wide text-ink">
               <BrainCircuit className="h-4 w-4 text-memory" aria-hidden="true" /> Nimbus Pay
             </p>
@@ -303,7 +346,7 @@ export default function Memory() {
                       setOpen((o) => ({ ...o, [service.service]: !o[service.service] }));
                       setSelection({ kind: "service", service: service.service });
                     }}
-                    className={`flex w-full items-center gap-1.5 rounded px-1.5 py-1 text-left text-xs hover:bg-bg ${selection.kind === "service" && selection.service === service.service ? "bg-bg text-ink" : "text-ink"}`}
+                    className={`flex w-full items-center gap-1.5 rounded-lg px-2 py-1.5 text-left text-xs hover:bg-white/[0.05] ${selection.kind === "service" && selection.service === service.service ? "bg-white/[0.07] text-ink" : "text-ink"}`}
                   >
                     {open[service.service] ? <ChevronDown className="h-3.5 w-3.5 text-muted" aria-hidden="true" /> : <ChevronRight className="h-3.5 w-3.5 text-muted" aria-hidden="true" />}
                     <Server className="h-3.5 w-3.5 text-muted" aria-hidden="true" />
@@ -319,7 +362,7 @@ export default function Memory() {
                             <button
                               type="button"
                               onClick={() => setSelection({ kind: "family", service: service.service, family: family.family })}
-                              className={`flex w-full items-center gap-1.5 rounded px-1.5 py-1 text-left text-xs ${active ? "bg-memory/10 text-memory" : "text-muted hover:bg-bg hover:text-ink"}`}
+                              className={`flex w-full items-center gap-1.5 rounded-lg px-2 py-1.5 text-left text-xs ${active ? "bg-memory/10 text-memory" : "text-muted hover:bg-white/[0.05] hover:text-ink"}`}
                             >
                               <TriangleAlert className="h-3.5 w-3.5" aria-hidden="true" />
                               {family.label}
@@ -338,7 +381,7 @@ export default function Memory() {
             </ul>
           </section>
 
-          <motion.section key={JSON.stringify(selection)} initial={{ opacity: 0, x: 6 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.18 }} className="glass p-5">
+          <motion.section key={JSON.stringify(selection)} initial={{ opacity: 0, x: 6 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.18 }} className="glass p-6">
             {selected?.kind === "family" ? (
               <FamilyDetail family={selected.family} service={selected.service.service} />
             ) : selected ? (
@@ -349,8 +392,8 @@ export default function Memory() {
           </motion.section>
         </div>
 
-        <section className="glass p-4">
-          <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted">
+        <section className="glass p-5">
+          <p className="eyebrow mb-3 flex items-center gap-1.5">
             <Activity className="h-4 w-4 text-memory" aria-hidden="true" /> Hindsight activity
           </p>
           {events.length === 0 ? (
@@ -359,7 +402,7 @@ export default function Memory() {
             <ul className="space-y-1">
               {events.map((event) => (
                 <li key={event.id} className="flex items-center gap-2 text-xs">
-                  <span className={`w-14 shrink-0 rounded px-1.5 py-0.5 text-center font-mono text-[10px] uppercase ${event.ok ? "bg-memory/10 text-memory" : "bg-severity/10 text-severity"}`}>
+                  <span className={`w-16 shrink-0 rounded-full px-1.5 py-0.5 text-center font-mono text-[10px] uppercase ${event.ok ? "bg-memory/10 text-memory" : "bg-severity/10 text-severity"}`}>
                     {event.kind}
                   </span>
                   <span className="min-w-0 flex-1 truncate text-ink">{event.detail}</span>

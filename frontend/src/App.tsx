@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useState } from "react";
+import { Component, useCallback, useEffect, useState, type ErrorInfo, type ReactNode } from "react";
+import { PlugZap, RotateCw, TriangleAlert } from "lucide-react";
 import { BrowserRouter, Route, Routes, useLocation } from "react-router-dom";
 import { PeekProvider } from "./components/IncidentPeek";
 import TopBar from "./components/TopBar";
-import { api } from "./lib/api";
+import { API_BASE, api } from "./lib/api";
 import { desktop } from "./lib/desktop";
 import type { MemoryStats, ProjectOut } from "./lib/types";
 import Console from "./pages/Console";
@@ -17,6 +18,70 @@ export interface SystemState {
   backendMessage: string | null;
   stats: MemoryStats | null;
   projects: ProjectOut[];
+}
+
+/** Shown instead of raw errors when the agent's backend cannot be reached. */
+function Offline({ onRetry }: { onRetry: () => void }) {
+  return (
+    <div className="flex h-full items-center justify-center p-6">
+      <div className="glass w-full max-w-md space-y-4 p-7 text-center">
+        <span className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-white/[0.06]">
+          <PlugZap className="h-6 w-6 text-muted" aria-hidden="true" />
+        </span>
+        <div className="space-y-1.5">
+          <h1 className="text-lg font-semibold">The agent is not reachable</h1>
+          <p className="text-sm text-muted">
+            On-Call Copilot could not connect to its backend. Nothing was lost; your memory lives in Hindsight.
+          </p>
+          {import.meta.env.DEV && (
+            <p className="pt-1 font-mono text-[11px] text-muted">
+              Expected at {API_BASE}. Start it with: uvicorn app.main:app --port 8000
+            </p>
+          )}
+        </div>
+        <button type="button" onClick={onRetry} className="btn btn-secondary">
+          <RotateCw className="h-3.5 w-3.5" aria-hidden="true" /> Try again
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** A render error shows a readable card with a reload button instead of a blank window. */
+class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
+  state: { error: Error | null } = { error: null };
+
+  static getDerivedStateFromError(error: Error): { error: Error } {
+    return { error };
+  }
+
+  componentDidCatch(error: Error, info: ErrorInfo): void {
+    console.error("On-Call Copilot render error:", error, info.componentStack);
+  }
+
+  render(): ReactNode {
+    const { error } = this.state;
+    if (!error) return this.props.children;
+    return (
+      <div className="flex h-full items-center justify-center p-6">
+        <div className="glass-strong w-full max-w-md space-y-4 rounded-[26px] p-7 text-center">
+          <span className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-400/10">
+            <TriangleAlert className="h-6 w-6 text-amber-300" aria-hidden="true" />
+          </span>
+          <div className="space-y-1.5">
+            <h1 className="text-lg font-semibold">This view hit a problem</h1>
+            <p className="text-sm text-muted">
+              Nothing was lost. If the backend was started before the latest update, restart it so the app and the backend match.
+            </p>
+            {import.meta.env.DEV && <p className="break-words pt-1 font-mono text-[11px] text-muted">{error.message}</p>}
+          </div>
+          <button type="button" onClick={() => window.location.reload()} className="btn btn-secondary">
+            <RotateCw className="h-3.5 w-3.5" aria-hidden="true" /> Reload
+          </button>
+        </div>
+      </div>
+    );
+  }
 }
 
 function Shell() {
@@ -57,13 +122,19 @@ function Shell() {
         onConnectProject={desktop ? () => void connectProject() : null}
       />
       <main className="min-h-0 flex-1">
+        {system.backend === "down" ? (
+          <Offline onRetry={refreshStats} />
+        ) : (
+        <ErrorBoundary key={location.pathname}>
         <Routes>
           <Route path="/" element={<Console memoryOn={memoryOn} refreshStats={refreshStats} projectId={system.projects[system.projects.length - 1]?.id ?? null} />} />
           <Route path="/history" element={<History />} />
           <Route path="/incidents/:id" element={<IncidentDetail />} />
           <Route path="/patterns" element={<Patterns />} />
-          <Route path="/memory" element={<Memory />} />
+          <Route path="/memory" element={<Memory demoTools={system.stats?.demo_tools ?? false} onChanged={refreshStats} />} />
         </Routes>
+        </ErrorBoundary>
+        )}
       </main>
     </div>
   );
@@ -74,7 +145,14 @@ export default function App() {
     <BrowserRouter>
       <PeekProvider>
         <Routes>
-          <Route path="/overlay" element={<Overlay />} />
+          <Route
+            path="/overlay"
+            element={
+              <ErrorBoundary>
+                <Overlay />
+              </ErrorBoundary>
+            }
+          />
           <Route path="*" element={<Shell />} />
         </Routes>
       </PeekProvider>

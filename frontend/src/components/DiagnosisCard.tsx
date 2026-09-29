@@ -1,9 +1,9 @@
-import { Ban, BrainCircuit, CircleCheck, CircleX, FileText, ShieldCheck, ShieldQuestion, ThumbsDown, ThumbsUp } from "lucide-react";
+import { Ban, BrainCircuit, CircleCheck, CircleX, CloudOff, FileText, ShieldCheck, ShieldQuestion, ThumbsDown, ThumbsUp, Waves } from "lucide-react";
 import { duration } from "../lib/format";
 import type { Diagnosis, Outcome } from "../lib/types";
+import { Evidence, FixHistory, NextSteps, Remembered, RootCause } from "./DiagnosisSections";
 import { IncidentChip, LinkedText } from "./IncidentPeek";
 import MarkdownLite from "./MarkdownLite";
-import CheckHere from "./CheckHere";
 import { ConfidenceBar } from "./ui";
 
 function Chips({ ids, tone }: { ids: string[]; tone: "memory" | "severity" | "success" }) {
@@ -15,6 +15,28 @@ function Chips({ ids, tone }: { ids: string[]; tone: "memory" | "severity" | "su
     </span>
   );
 }
+
+/** The one-line statement of what this answer is based on, computed from the response. */
+export function ModeLine({ diagnosis }: { diagnosis: Diagnosis }) {
+  if (diagnosis.memory_unavailable) {
+    return (
+      <p className="flex items-center gap-1.5 text-xs text-amber-300">
+        <CloudOff className="h-3.5 w-3.5" aria-hidden="true" /> Hindsight unavailable. Diagnosis based only on the current context.
+      </p>
+    );
+  }
+  if (!diagnosis.memory_enabled) return <p className="text-xs text-muted">Diagnosis based only on the current context.</p>;
+  const cited = diagnosis.cited_incidents.length;
+  return (
+    <p className="text-xs text-muted">
+      {cited > 0
+        ? `Diagnosis informed by ${cited} verified past incident${cited === 1 ? "" : "s"} out of ${diagnosis.matched.length} recalled from Hindsight.`
+        : `Hindsight recalled ${diagnosis.matched.length} related incident${diagnosis.matched.length === 1 ? "" : "s"}, none confirmed as the same failure.`}
+    </p>
+  );
+}
+
+const OUTCOME_TEXT: Record<Outcome, string> = { worked: "worked", failed: "did not work", partial: "partially worked" };
 
 export default function DiagnosisCard({ diagnosis, onOutcome, recorded, compact = false }: {
   diagnosis: Diagnosis;
@@ -41,20 +63,22 @@ export default function DiagnosisCard({ diagnosis, onOutcome, recorded, compact 
   }
 
   return (
-    <div className={`space-y-4 rounded-2xl border p-4 ${memory ? "border-memory/30 bg-black/30 shadow-[inset_0_1px_0_rgba(20,184,166,0.15)]" : "border-border bg-black/20"}`}>
+    <div
+      className={`space-y-5 rounded-[20px] border p-5 ${memory ? "border-memory/25 bg-gradient-to-b from-memory/[0.07] to-black/20" : "border-white/[0.07] bg-black/25"}`}
+    >
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <span className={`flex items-center gap-2 text-xs font-semibold uppercase tracking-wide ${memory ? "text-memory" : "text-muted"}`}>
-          <BrainCircuit className="h-4 w-4" aria-hidden="true" />
+        <span className={`flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.08em] ${memory ? "text-memory" : "text-muted"}`}>
+          {memory ? <BrainCircuit className="h-4 w-4" aria-hidden="true" /> : <Waves className="h-4 w-4" aria-hidden="true" />}
           {memory ? "With memory" : "Without memory"}
         </span>
         <div className="flex items-center gap-3">
           {memory &&
             (diagnosis.strong_match ? (
-              <span className="flex items-center gap-1 rounded bg-memory/10 px-1.5 py-0.5 text-[11px] text-memory">
+              <span className="flex items-center gap-1 rounded-full bg-memory/10 px-2 py-0.5 text-[11px] text-memory">
                 <ShieldCheck className="h-3.5 w-3.5" aria-hidden="true" /> Precedent confirmed
               </span>
             ) : (
-              <span className="flex items-center gap-1 rounded bg-amber-400/10 px-1.5 py-0.5 text-[11px] text-amber-300">
+              <span className="flex items-center gap-1 rounded-full bg-amber-400/10 px-2 py-0.5 text-[11px] text-amber-300">
                 <ShieldQuestion className="h-3.5 w-3.5" aria-hidden="true" /> No strong precedent
               </span>
             ))}
@@ -62,36 +86,27 @@ export default function DiagnosisCard({ diagnosis, onOutcome, recorded, compact 
         </div>
       </div>
 
-      <div className="space-y-2">
+      {!compact && <Remembered diagnosis={diagnosis} />}
+
+      <div className="space-y-2.5">
+        {memory && diagnosis.strong_match && !compact && <p className="text-lg font-semibold tracking-tight text-ink">I've seen this before.</p>}
         <p className={`text-sm leading-6 ${memory ? "text-ink" : "text-muted"}`}>
           <LinkedText text={diagnosis.summary} />
         </p>
+        <ModeLine diagnosis={diagnosis} />
         <div className="flex items-center gap-2 text-xs text-muted">
           Confidence <ConfidenceBar value={diagnosis.confidence} tone={memory ? "memory" : "muted"} />
         </div>
       </div>
 
-      {!compact && diagnosis.hypotheses.length > 0 && (
-        <div className="space-y-1.5">
-          <p className="text-xs text-muted">Hypotheses</p>
-          <ul className="space-y-1.5">
-            {diagnosis.hypotheses.map((h) => (
-              <li key={h.cause} className="flex flex-wrap items-center gap-2 text-xs">
-                <span className="font-mono text-muted">{Math.round(h.confidence * 100)}%</span>
-                <span className={memory ? "text-ink" : "text-muted"}>{h.cause}</span>
-                {h.evidence.length > 0 && <Chips ids={h.evidence} tone="memory" />}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
+      {!compact && memory && <RootCause diagnosis={diagnosis} />}
 
       {diagnosis.try_first && (
-        <div className={`space-y-2 rounded-xl border p-3 ${memory ? "border-success/30 bg-success/5" : "border-border"}`}>
-          <p className={`flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide ${memory ? "text-success" : "text-muted"}`}>
-            <CircleCheck className="h-4 w-4" aria-hidden="true" /> Try first
+        <div className={memory ? "tile-success space-y-2" : "tile space-y-2"}>
+          <p className={`eyebrow flex items-center gap-1.5 ${memory ? "!text-success" : ""}`}>
+            <CircleCheck className="h-3.5 w-3.5" aria-hidden="true" /> Try first
           </p>
-          <p className={`text-sm ${memory ? "text-ink" : "text-muted"}`}>{diagnosis.try_first.action}</p>
+          <p className={`text-sm leading-6 ${memory ? "text-ink" : "text-muted"}`}>{diagnosis.try_first.action}</p>
           {diagnosis.try_first.evidence.length > 0 && (
             <p className="flex flex-wrap items-center gap-1.5 text-xs text-muted">
               Worked in {diagnosis.try_first.evidence.length} incident{diagnosis.try_first.evidence.length === 1 ? "" : "s"}:
@@ -99,25 +114,20 @@ export default function DiagnosisCard({ diagnosis, onOutcome, recorded, compact 
             </p>
           )}
           {onOutcome && (
-            <div className="flex items-center gap-2 pt-1">
+            <div className="flex flex-wrap items-center gap-2 pt-1">
               {recorded ? (
-                <span className={`text-xs ${recorded === "worked" ? "text-success" : "text-severity"}`}>
-                  Recorded as {recorded === "worked" ? "worked" : "did not work"} and saved to memory.
+                <span className={`text-xs ${recorded === "worked" ? "text-success" : recorded === "partial" ? "text-amber-300" : "text-severity"}`}>
+                  Recorded as {OUTCOME_TEXT[recorded]} and sent to memory.
                 </span>
               ) : (
                 <>
-                  <button
-                    type="button"
-                    onClick={() => onOutcome(diagnosis.try_first?.action ?? "", "worked")}
-                    className="flex items-center gap-1.5 rounded-md border border-success/40 px-2.5 py-1 text-xs text-success hover:bg-success/10"
-                  >
+                  <button type="button" onClick={() => onOutcome(diagnosis.try_first?.action ?? "", "worked")} className="btn btn-success btn-sm">
                     <ThumbsUp className="h-3.5 w-3.5" aria-hidden="true" /> Worked
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => onOutcome(diagnosis.try_first?.action ?? "", "failed")}
-                    className="flex items-center gap-1.5 rounded-md border border-severity/40 px-2.5 py-1 text-xs text-severity hover:bg-severity/10"
-                  >
+                  <button type="button" onClick={() => onOutcome(diagnosis.try_first?.action ?? "", "partial")} className="btn btn-amber btn-sm">
+                    Partially
+                  </button>
+                  <button type="button" onClick={() => onOutcome(diagnosis.try_first?.action ?? "", "failed")} className="btn btn-danger btn-sm">
                     <ThumbsDown className="h-3.5 w-3.5" aria-hidden="true" /> Didn't work
                   </button>
                 </>
@@ -127,12 +137,10 @@ export default function DiagnosisCard({ diagnosis, onOutcome, recorded, compact 
         </div>
       )}
 
-      {!compact && <CheckHere findings={diagnosis.findings ?? []} project={diagnosis.project ?? null} />}
-
       {diagnosis.avoid.length > 0 && (
-        <div className={`space-y-2.5 rounded-xl border p-3 ${memory ? "border-severity/30 bg-severity/5" : "border-border"}`}>
-          <p className={`flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide ${memory ? "text-severity" : "text-muted"}`}>
-            <Ban className="h-4 w-4" aria-hidden="true" /> {memory ? "Avoid: failed before" : "Avoid"}
+        <div className={memory ? "tile-severity space-y-2.5" : "tile space-y-2.5"}>
+          <p className={`eyebrow flex items-center gap-1.5 ${memory ? "!text-severity" : ""}`}>
+            <Ban className="h-3.5 w-3.5" aria-hidden="true" /> {memory ? "Avoid: failed before" : "Avoid"}
           </p>
           <ul className="space-y-2.5">
             {diagnosis.avoid.map((item) => (
@@ -157,6 +165,12 @@ export default function DiagnosisCard({ diagnosis, onOutcome, recorded, compact 
           </ul>
         </div>
       )}
+
+      {!compact && memory && (
+        <FixHistory matched={diagnosis.matched} worked={diagnosis.worked_fixes} failed={diagnosis.failed_fixes} final strong={diagnosis.strong_match} />
+      )}
+      {!compact && memory && <Evidence diagnosis={diagnosis} />}
+      {!compact && <NextSteps diagnosis={diagnosis} />}
     </div>
   );
 }

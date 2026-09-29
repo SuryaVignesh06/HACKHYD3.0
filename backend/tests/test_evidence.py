@@ -12,6 +12,7 @@ from app.services.evidence import (
     matched_incidents,
     parse_alert,
     scrub_unverified,
+    scrub_unverified_lines,
     strip_incident_ids,
     verify_draft,
 )
@@ -157,3 +158,10 @@ def test_parse_alert_reads_raw_log_lines() -> None:
 
 def test_strip_incident_ids() -> None:
     assert strip_incident_ids("Like INC-030, restart.") == "Like a past incident, restart."
+
+
+def test_scrub_unverified_lines_keeps_markdown_structure() -> None:
+    text = "Yes, seen before in INC-030.\n\n* **Worked:** raised the pool (INC-030).\n* Also INC-999 did this.\n  - nested INC-037 detail"
+    assert scrub_unverified_lines(text, {"INC-030", "INC-037"}) == (
+        "Yes, seen before in INC-030.\n\n* **Worked:** raised the pool (INC-030).\n  - nested INC-037 detail")
+

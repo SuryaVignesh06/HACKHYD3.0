@@ -84,6 +84,14 @@ export interface MatchedIncident {
   service: string | null;
   relevance: number;
   occurred_at: string | null;
+  learned_live: boolean;
+}
+
+export interface FixRecord {
+  action: string;
+  incident_id: string;
+  outcome: Outcome;
+  notes: string | null;
 }
 
 export interface InvestigationStep {
@@ -105,8 +113,11 @@ export interface Diagnosis {
   findings: CodeFinding[];
   unknowns: string[];
   project: string | null;
+  worked_fixes: FixRecord[];
+  failed_fixes: FixRecord[];
   strong_match: boolean;
   memory_enabled: boolean;
+  memory_unavailable: boolean;
   degraded: boolean;
   latency_ms: number;
 }
@@ -164,6 +175,27 @@ export interface MemoryStats {
   memory_count: number | null;
   observation_count: number | null;
   available: boolean;
+  demo_tools: boolean;
+}
+
+export interface SeedResult {
+  status: "success" | "already_seeded";
+  bank: string;
+  created: number;
+  skipped: number;
+  memory_count: number | null;
+  log: string[];
+}
+
+export interface LearnedExperience {
+  id: string;
+  title: string;
+  service: string;
+  root_cause: string | null;
+  fix: string | null;
+  resolved_at: string | null;
+  worked: number;
+  failed: number;
 }
 
 export interface LearningPoint {
@@ -277,11 +309,20 @@ export interface MemoryOverview {
   };
   services: ServiceNode[];
   growth: { at: string; incidents_learned: number; fixes_recorded: number }[];
+  recent_learned: LearnedExperience[];
 }
 
 export interface RecallStepData {
   matched: MatchedIncident[];
   recalled: RecalledMemory[];
+  unavailable?: boolean;
+}
+
+export interface EvidenceStepData {
+  worked: number;
+  failed: number;
+  worked_fixes: FixRecord[];
+  failed_fixes: FixRecord[];
 }
 
 export type StreamEvent =
@@ -292,6 +333,28 @@ export type StreamEvent =
 export interface ApiError {
   error: string;
   message: string;
+}
+
+export interface PastIncident {
+  id: string;
+  title: string;
+  service: string;
+  occurred_at: string | null;
+  relevance: number | null;
+  learned_live: boolean;
+  root_cause: string | null;
+  fix: string | null;
+  worked: string[];
+  failed: string[];
+}
+
+export interface AskAnswer {
+  question: string;
+  answer: string;
+  incidents: PastIncident[];
+  recalled_count: number;
+  memory_unavailable: boolean;
+  latency_ms: number;
 }
 
 export type ApiResult<T> = { ok: true; data: T } | { ok: false; error: ApiError };
