@@ -25,6 +25,7 @@ const UNSAFE_PATH = /["&|<>^%!\r\n]/;
 
 let mainWindow: BrowserWindow | null = null;
 let overlay: BrowserWindow | null = null;
+let activeShortcut = config.shortcut;
 let shortcutRegistered = false;
 let expanded = false;
 let quitting = false;
@@ -46,6 +47,7 @@ function createMainWindow(): void {
     webPreferences: { preload: preload(), contextIsolation: true, sandbox: true },
   });
   mainWindow.once("ready-to-show", () => mainWindow?.show());
+  mainWindow.webContents.on("did-finish-load", () => broadcastShortcutStatus());
   void mainWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(SPLASH_HTML)}`);
   mainWindow.on("closed", () => {
     mainWindow = null;
@@ -70,6 +72,7 @@ function createOverlay(): void {
   });
   overlay.setAlwaysOnTop(true, "floating");
   overlay.setVisibleOnAllWorkspaces(true);
+  overlay.webContents.on("did-finish-load", () => broadcastShortcutStatus());
   // The overlay deliberately stays open on blur, so the engineer can switch to the editor to apply the fix.
   void overlay.loadURL(`${config.frontendUrl}/overlay`);
 }
@@ -118,9 +121,46 @@ function scheduleSelfTestCaptures(): void {
   }
 }
 
+function broadcastShortcutStatus(): void {
+  const payload = { shortcut: activeShortcut, registered: shortcutRegistered };
+  try {
+    mainWindow?.webContents.send("copilot:shortcut-updated", payload);
+  } catch {}
+  try {
+    overlay?.webContents.send("copilot:shortcut-updated", payload);
+  } catch {}
+}
+
 function registerShortcut(): void {
-  shortcutRegistered = globalShortcut.register(config.shortcut, () => void activate());
-  console.log(shortcutRegistered ? `On-Call Copilot: ${config.shortcut} registered` : `On-Call Copilot: ${config.shortcut} is taken by another app`);
+  try {
+    globalShortcut.unregisterAll();
+  } catch {}
+
+  const candidates = [config.shortcut, "Control+Shift+Space", "Alt+Space"].filter(
+    (s, idx, arr) => Boolean(s) && arr.indexOf(s) === idx,
+  );
+
+  for (const candidate of candidates) {
+    try {
+      const ok = globalShortcut.register(candidate, () => void activate());
+      if (ok) {
+        shortcutRegistered = true;
+        activeShortcut = candidate;
+        console.log(`On-Call Copilot: Registered shortcut ${candidate}`);
+        broadcastShortcutStatus();
+        return;
+      } else {
+        console.warn(`On-Call Copilot: ${candidate} is taken by another app or OS`);
+      }
+    } catch (e) {
+      console.warn(`On-Call Copilot: Error registering ${candidate}:`, e);
+    }
+  }
+
+  shortcutRegistered = false;
+  activeShortcut = config.shortcut;
+  console.warn("On-Call Copilot: All global shortcuts taken. Overlay is accessible via TopBar button.");
+  broadcastShortcutStatus();
 }
 
 async function api<T>(path: string, init?: RequestInit): Promise<{ ok: true; data: T } | { ok: false; message: string }> {
@@ -213,8 +253,9 @@ async function removeOnceProjects(): Promise<void> {
 }
 
 ipcMain.on("copilot:config", (event) => {
-  event.returnValue = { shortcut: config.shortcut, shortcutRegistered, apiBase: config.apiBase };
+  event.returnValue = { shortcut: activeShortcut, shortcutRegistered, apiBase: config.apiBase };
 });
+ipcMain.on("copilot:toggle-overlay", () => void activate());
 ipcMain.on("copilot:hide", () => overlay?.hide());
 ipcMain.on("copilot:set-expanded", (_event, value: boolean) => {
   expanded = Boolean(value);

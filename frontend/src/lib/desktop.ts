@@ -22,6 +22,8 @@ export interface CopilotBridge {
   isDesktop: true;
   shortcut: string;
   shortcutRegistered: boolean;
+  toggleOverlay?(): void;
+  onShortcutUpdated?(callback: (payload: { shortcut: string; registered: boolean }) => void): () => void;
   onActivated(callback: (payload: Activation) => void): () => void;
   hide(): void;
   setExpanded(value: boolean): void;

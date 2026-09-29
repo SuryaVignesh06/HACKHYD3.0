@@ -28,8 +28,8 @@ MAX_RECALLED_IN_PROMPT = 10
 MAX_REFLECT_CHARS = 6000
 # Free Nemotron latency varies a lot (measured 4 s to 24 s for the same prompt), so the primary gets a
 # hard deadline and the fallback gets the rest of a reasonable budget.
-PRIMARY_TIMEOUT_S = 15.0
-FALLBACK_TIMEOUT_S = 20.0
+PRIMARY_TIMEOUT_S = 35.0
+FALLBACK_TIMEOUT_S = 45.0
 
 DIAGNOSIS_SCHEMA = """{
   "strong_precedent": boolean,  // true only if a citable incident had the SAME failure mechanism
@@ -237,16 +237,24 @@ class LLMService:
 
     async def complete_json(self, system: str, user: str, schema: type[T]) -> tuple[T, str]:
         """Primary model, then fallback. Returns the parsed object and the model that produced it."""
-        attempts = ((self.settings.LLM_MODEL_PRIMARY, PRIMARY_TIMEOUT_S),
-                    (self.settings.LLM_MODEL_FALLBACK, FALLBACK_TIMEOUT_S))
-        for model, timeout in attempts:
-            try:
-                # OpenRouter streams keep-alive whitespace, so httpx's read timeout never fires; enforce a total deadline.
-                text = await asyncio.wait_for(self._chat(model, system, user, timeout), timeout)
-                return schema.model_validate(normalise_confidences(extract_json(text))), model
-            except (httpx.HTTPError, ValueError, ValidationError, KeyError, IndexError, TimeoutError) as exc:
-                logger.warning("LLM call failed: model=%s error=%s: %s", model, type(exc).__name__, str(exc)[:300])
-        raise LLMUnavailable("Both language models failed.")
+        models = [self.settings.LLM_MODEL_PRIMARY, self.settings.LLM_MODEL_FALLBACK]
+        unique_models = list(dict.fromkeys(m for m in models if m))
+        
+        last_error: Exception | None = None
+        for model in unique_models:
+            timeout = PRIMARY_TIMEOUT_S if model == self.settings.LLM_MODEL_PRIMARY else FALLBACK_TIMEOUT_S
+            for attempt in range(2):
+                try:
+                    # OpenRouter streams keep-alive whitespace, so httpx's read timeout never fires; enforce a total deadline.
+                    text = await asyncio.wait_for(self._chat(model, system, user, timeout), timeout)
+                    return schema.model_validate(normalise_confidences(extract_json(text))), model
+                except (httpx.HTTPError, ValueError, ValidationError, KeyError, IndexError, TimeoutError) as exc:
+                    last_error = exc
+                    logger.warning("LLM call failed: model=%s attempt=%d error=%s: %s",
+                                   model, attempt + 1, type(exc).__name__, str(exc)[:300])
+                    if attempt == 0:
+                        await asyncio.sleep(1.0)
+        raise LLMUnavailable(f"Both language models failed ({type(last_error).__name__ if last_error else 'unknown'}).")
 
     async def format_diagnosis(self, alert_text: str, service: str, signature: str,
                                matched: list[MatchedIncident], attempts_by_incident: dict[str, list[AttemptFacts]],

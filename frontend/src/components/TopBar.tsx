@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { Brain, Cpu, FolderOpen, FolderPlus, History, Keyboard, Layers, LayoutDashboard, Network, Siren } from "lucide-react";
 import { NavLink } from "react-router-dom";
 import type { SystemState } from "../App";
@@ -34,6 +35,20 @@ function SystemStatus({ system, onConnectProject }: { system: SystemState; onCon
   const { backend, stats, projects } = system;
   const project = projects[projects.length - 1];
   const dev = import.meta.env.DEV;
+
+  const [shortcutState, setShortcutState] = useState({
+    shortcut: desktop?.shortcut ?? "Control+Space",
+    registered: desktop?.shortcutRegistered ?? false,
+  });
+
+  useEffect(() => {
+    if (!desktop) return;
+    setShortcutState({ shortcut: desktop.shortcut, registered: desktop.shortcutRegistered });
+    if (desktop.onShortcutUpdated) {
+      return desktop.onShortcutUpdated((s) => setShortcutState({ shortcut: s.shortcut, registered: s.registered }));
+    }
+  }, []);
+
   return (
     <div className="flex items-center gap-3 text-xs">
       <span className="flex items-center gap-1.5 text-muted" title={dev ? `Backend: ${API_BASE}` : undefined}>
@@ -72,14 +87,24 @@ function SystemStatus({ system, onConnectProject }: { system: SystemState; onCon
           </button>
         ))}
       {desktop && (
-        <span
-          className="flex items-center gap-1.5 rounded border border-border px-1.5 py-0.5 font-mono text-[10px] text-muted"
-          title={desktop.shortcutRegistered ? "Press anywhere to open the Copilot overlay" : "Another app owns this shortcut; set ONCALL_SHORTCUT in .env"}
+        <button
+          type="button"
+          onClick={() => desktop?.toggleOverlay?.()}
+          className="flex items-center gap-1.5 rounded border border-border px-2 py-0.5 font-mono text-[10px] text-muted hover:border-accent hover:text-ink transition-colors cursor-pointer"
+          title={
+            shortcutState.registered
+              ? `Press ${shortcutLabel(shortcutState.shortcut)} anywhere to toggle overlay, or click here to open`
+              : "Click here to open the Copilot overlay"
+          }
         >
           <Keyboard className="h-3 w-3" aria-hidden="true" />
-          {shortcutLabel(desktop.shortcut)}
-          {!desktop.shortcutRegistered && <span className="text-severity">unavailable</span>}
-        </span>
+          <span>{shortcutLabel(shortcutState.shortcut)}</span>
+          {shortcutState.registered ? (
+            <span className="text-emerald-400 font-sans text-[9px] bg-emerald-500/10 px-1 py-0.2 rounded">active</span>
+          ) : (
+            <span className="text-amber-400 font-sans text-[9px] bg-amber-500/10 px-1 py-0.2 rounded">click to open</span>
+          )}
+        </button>
       )}
     </div>
   );
