@@ -1,0 +1,17 @@
+{
+  "name": "oncall-copilot",
+  "version": "0.3.0",
+  "private": true,
+  "description": "On-Call Copilot: unified desktop engineering memory agent",
+  "scripts": {
+    "start": "npm --prefix desktop run start",
+    "dev": "npm --prefix desktop run start",
+    "desktop": "npm --prefix desktop run start",
+    "frontend": "npm --prefix frontend run dev",
+    "backend": "powershell -ExecutionPolicy Bypass -Command \"& { if (Test-Path backend\\.venv\\Scripts\\python.exe) { backend\\.venv\\Scripts\\python.exe -m uvicorn app.main:app --port 8000 } else { python -m uvicorn app.main:app --port 8000 } }\"",
+    "build:frontend": "npm --prefix frontend run build",
+    "build:desktop": "npm --prefix desktop run build",
+    "build": "npm --prefix frontend run build && npm --prefix desktop run build",
+    "typecheck": "npm --prefix frontend run typecheck && npm --prefix desktop run typecheck"
+  }
+}

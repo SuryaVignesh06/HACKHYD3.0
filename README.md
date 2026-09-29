@@ -49,11 +49,25 @@ Outcome + postmortem  ->  Hindsight retain  ->  better next incident
 
 Hindsight is the memory: it stores every incident, attempt and postmortem, extracts facts, consolidates observations across incidents on its own, recalls by meaning with a relevance score, and reflects across memories under the bank's mission, directives and skeptical disposition. The LLM is not the memory. It only turns what Hindsight returns, plus the fix log and the project findings, into a structured answer, and the backend verifies every incident it cites.
 
-## Desktop agent
+## Desktop agent (Unified Electron App)
+
+Both the FastAPI backend and Frontend (Vite) run automatically when you launch the Electron app:
 
 ```bash
-cd desktop && npm install && npm start      # needs the backend on :8000 and the frontend dev server on :5173
+# From repository root:
+npm start
+
+# Or from desktop directory:
+cd desktop && npm start
 ```
+
+When started, Electron:
+1. Displays a sleek initialization screen.
+2. Checks and automatically launches the FastAPI backend on port `8000` (using `.venv` or system Python).
+3. Checks and automatically launches the Frontend dev server on port `5173`.
+4. Waits for both services to be responsive and transitions directly into the full application and overlay.
+5. Gracefully terminates both backend and frontend subprocesses on exit.
+
 
 - Press **Ctrl + Space** anywhere to open the overlay (set `ONCALL_SHORTCUT` in `.env` to change it; `Control+Shift+Space` avoids VS Code's own Ctrl+Space). Escape or the shortcut closes it. It opened in 109 ms in testing.
 - **Connect project** asks with a native dialog (Allow once, Always allow, Cancel). The agent only reads inside connected folders, never writes, and rejects paths outside them.

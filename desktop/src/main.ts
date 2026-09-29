@@ -16,6 +16,8 @@ import {
 } from "electron";
 import { foregroundWindow, stop as stopForeground, warmUp } from "./activeWindow";
 import { config } from "./env";
+import { startServices, stopServices } from "./serverManager";
+import { SPLASH_HTML } from "./splash";
 
 const COMPACT = { width: 500, height: 600 };
 const EXPANDED = { width: 540, height: 860 };
@@ -44,7 +46,7 @@ function createMainWindow(): void {
     webPreferences: { preload: preload(), contextIsolation: true, sandbox: true },
   });
   mainWindow.once("ready-to-show", () => mainWindow?.show());
-  void mainWindow.loadURL(config.frontendUrl);
+  void mainWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(SPLASH_HTML)}`);
   mainWindow.on("closed", () => {
     mainWindow = null;
     app.quit();
@@ -237,14 +239,40 @@ if (!app.requestSingleInstanceLock()) {
     mainWindow?.show();
     mainWindow?.focus();
   });
-  void app.whenReady().then(() => {
+  void app.whenReady().then(async () => {
     warmUp();
     createMainWindow();
-    createOverlay();
-    registerShortcut();
-    // Self-test only: run the exact shortcut handler once, since synthetic key presses from a
-    // background process do not reach the interactive desktop's hotkey handler.
-    if (config.captureDir) setTimeout(() => void activate(), 6000);
+
+    try {
+      await startServices((status) => {
+        if (!mainWindow || mainWindow.isDestroyed()) return;
+        mainWindow.webContents.executeJavaScript(`
+          if (document.getElementById('status')) {
+            document.getElementById('status').innerText = ${JSON.stringify(status)};
+          }
+        `).catch(() => {});
+      });
+
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        await mainWindow.loadURL(config.frontendUrl);
+      }
+      createOverlay();
+      registerShortcut();
+      // Self-test only: run the exact shortcut handler once, since synthetic key presses from a
+      // background process do not reach the interactive desktop's hotkey handler.
+      if (config.captureDir) setTimeout(() => void activate(), 6000);
+    } catch (err) {
+      console.error("[Electron] Failed to start services:", err);
+      const msg = err instanceof Error ? err.message : String(err);
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.executeJavaScript(`
+          if (document.getElementById('status')) {
+            document.getElementById('status').style.color = '#EF4444';
+            document.getElementById('status').innerText = 'Error: ' + ${JSON.stringify(msg)};
+          }
+        `).catch(() => {});
+      }
+    }
   });
   app.on("before-quit", (event) => {
     if (quitting) return;
@@ -252,7 +280,10 @@ if (!app.requestSingleInstanceLock()) {
     event.preventDefault();
     globalShortcut.unregisterAll();
     stopForeground();
-    void removeOnceProjects().finally(() => app.exit(0));
+    void removeOnceProjects().finally(() => {
+      stopServices();
+      app.exit(0);
+    });
   });
   app.on("window-all-closed", () => app.quit());
 }
